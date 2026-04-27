@@ -1,0 +1,25 @@
+# transient logs
+logs/
+*.log
+
+# raw conversation transcripts (sensitive — may contain personal context)
+ClaudeCONVO.txt
+Convo2.txt
+
+# tooling state
+.claude/
+
+# IsoBuilder transient working dirs (these can be huge — keep config in templates/)
+IsoBuilder/output/
+IsoBuilder/work/
+IsoBuilder/payload/
+
+# Windows / editor cruft
+Thumbs.db
+desktop.ini
+*.swp
+*.swo
+*.tmp
+.vs/
+.vscode/
+.idea/

@@ -1,0 +1,238 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Preset isAutoSaved="true" xmlns="urn:schemas-nliteos-com:pn.v1">
+	<Date>02/22/2024 18:03:33</Date>
+	<AppInfo>
+		<Version>2023.12.9552</Version>
+		<Licensed>Yes</Licensed>
+		<Protections>Yes</Protections>
+		<Host>Windows 10 Home 22H2 x64 - 10.0.19045.3803 (en-US)</Host>
+	</AppInfo>
+	<ImageInfo>
+		<Version mode="offline">Windows 11 ProfessionalWorkstation 23H2 x64 - 10.0.22631.3155 (en-US)</Version>
+		<GUID>{82723A86-EB13-4A00-A458-054833323262}</GUID>
+	</ImageInfo>
+	<RemoveComponents AppRemovalMode="DISM"></RemoveComponents>
+	<Compatibility protectHidden="true">
+		<ComponentFeatures>
+			<Feature enabled="no">AppGuard</Feature>
+			<Feature enabled="no">YubiKey</Feature>
+			<Feature enabled="no">Bluetooth</Feature>
+			<Feature enabled="yes">USBCamera</Feature>
+			<Feature enabled="no">CapFrameX</Feature>
+			<Feature enabled="yes">Discord</Feature>
+			<Feature enabled="yes">FileSharing</Feature>
+			<Feature enabled="no">Hyper-V</Feature>
+			<Feature enabled="no">iCloud</Feature>
+			<Feature enabled="no">Kaspersky</Feature>
+			<Feature enabled="yes">ManualSetup</Feature>
+			<Feature enabled="yes">OfficeSupport</Feature>
+			<Feature enabled="yes">AppxSupport</Feature>
+			<Feature enabled="yes">Netflix</Feature>
+			<Feature enabled="no">NetworkDiscovery</Feature>
+			<Feature enabled="yes">NightLight</Feature>
+			<Feature enabled="yes">NvidiaSetup</Feature>
+			<Feature enabled="yes">OOBE</Feature>
+			<Feature enabled="yes">Printing</Feature>
+			<Feature enabled="yes">Recommended-All</Feature>
+			<Feature enabled="no">SamsungSwitch</Feature>
+			<Feature enabled="yes">Scanning</Feature>
+			<Feature enabled="yes">ServicingStack</Feature>
+			<Feature enabled="yes">ShellSearchSupport</Feature>
+			<Feature enabled="yes">Spotify</Feature>
+			<Feature enabled="yes">SFC</Feature>
+			<Feature enabled="yes">DefaultFonts</Feature>
+			<Feature enabled="no">SafeMode</Feature>
+			<Feature enabled="yes">TeamViewer</Feature>
+			<Feature enabled="no">Recommended-Tablet</Feature>
+			<Feature enabled="no">USBModem</Feature>
+			<Feature enabled="yes">USB</Feature>
+			<Feature enabled="yes">VideoPlayback</Feature>
+			<Feature enabled="no">VPN</Feature>
+			<Feature enabled="yes">VisualStudio</Feature>
+			<Feature enabled="no">VSS</Feature>
+			<Feature enabled="yes">ActivationKMS</Feature>
+			<Feature enabled="yes">Activation</Feature>
+			<Feature enabled="yes">WinSetup</Feature>
+			<Feature enabled="yes">WindowsStore</Feature>
+			<Feature enabled="yes">WindowsUpdate</Feature>
+			<Feature enabled="yes">WLAN</Feature>
+		</ComponentFeatures>
+		<MachineDrivers>
+			<Machine enabled="yes">HostMachine</Machine>
+			<Machine enabled="no">Hyper-V VM</Machine>
+			<Machine enabled="no">Parallels VM</Machine>
+			<Machine enabled="no">Virtual Box VM</Machine>
+			<Machine enabled="no">VMware VM</Machine>
+		</MachineDrivers>
+	</Compatibility>
+	<Features>
+		<Feature name="NetFX3~~~~">true</Feature>
+		<Feature name="OneCoreUAP.OneSync~~~~0.0.1.0">false</Feature>
+		<Feature name="Hello.Face.20134~~~~0.0.1.0">false</Feature>
+		<Feature name="Printing-Foundation-InternetPrinting-Client">false</Feature>
+		<Feature name="Printing-PrintToPDFServices-Features">false</Feature>
+		<Feature name="Printing-Foundation-Features">false</Feature>
+		<Feature name="MSRDC-Infrastructure">false</Feature>
+		<Feature name="SmbDirect">false</Feature>
+		<Feature name="WCF-TCP-PortSharing45">false</Feature>
+		<Feature name="Microsoft.Windows.Ethernet.Client.Vmware.Vmxnet3~~~~0.0.1.0">false</Feature>
+		<Feature name="Microsoft.Windows.PowerShell.ISE~~~~0.0.1.0">false</Feature>
+		<Feature name="Microsoft.Windows.WordPad~~~~0.0.1.0">false</Feature>
+		<Feature name="WorkFolders-Client">false</Feature>
+	</Features>
+	<Packages></Packages>
+	<Commands>
+		<PostUpdates>
+			<!--<Command>cmd /c echo Example from [MOUNTDIR]\Windows &amp; pause</Command>-->
+			<!--<Command>dism /image:[MOUNTDIR] /get-intl</Command>-->
+		</PostUpdates>
+	</Commands>
+	<Drivers showHidden="true"></Drivers>
+	<Unattended mode="1">
+		<AnswerFileLocationPanther>false</AnswerFileLocationPanther>
+		<AnswerFileLocationBoot>false</AnswerFileLocationBoot>
+		<SaveBothArch>false</SaveBothArch>
+		<EditionPrompt>false</EditionPrompt>
+		<settings pass="oobeSystem">
+			<component name="Microsoft-Windows-International-Core">
+				<InputLocale>0409:00000409</InputLocale>
+				<SystemLocale>en-US</SystemLocale>
+				<UILanguage>en-US</UILanguage>
+				<UILanguageFallback>en-US</UILanguageFallback>
+				<UserLocale>en-US</UserLocale>
+			</component>
+			<component name="Microsoft-Windows-Shell-Setup">
+				<TimeZone>W. Europe Standard Time</TimeZone>
+				<AutoLogon>
+					<Enabled>true</Enabled>
+					<LogonCount>9999999</LogonCount>
+					<Username>Administrator</Username>
+					<Password>
+						<PlainText>true</PlainText>
+						<Value></Value>
+					</Password>
+				</AutoLogon>
+				<OOBE>
+					<HideEULAPage>true</HideEULAPage>
+					<HideLocalAccountScreen>true</HideLocalAccountScreen>
+					<HideOnlineAccountScreens>true</HideOnlineAccountScreens>
+					<HideWirelessSetupInOOBE>true</HideWirelessSetupInOOBE>
+					<NetworkLocation>Home</NetworkLocation>
+					<ProtectYourPC>3</ProtectYourPC>
+					<SkipMachineOOBE>true</SkipMachineOOBE>
+					<SkipUserOOBE>true</SkipUserOOBE>
+				</OOBE>
+				<UserAccounts>
+					<AdministratorPassword>
+						<PlainText>true</PlainText>
+						<Value></Value>
+					</AdministratorPassword>
+					<LocalAccounts>
+						<LocalAccount>
+							<DisplayName>TweakingGuy</DisplayName>
+							<Group>Administrators</Group>
+							<Name>Administrator</Name>
+							<Password>
+								<PlainText>true</PlainText>
+								<Value></Value>
+							</Password>
+						</LocalAccount>
+					</LocalAccounts>
+				</UserAccounts>
+			</component>
+		</settings>
+		<settings pass="specialize">
+			<component name="Microsoft-Windows-Deployment">
+				<RunSynchronous>
+					<RunSynchronousCommand>
+						<Order>1</Order>
+						<Path>net user Administrator /active:Yes</Path>
+						<WillReboot>Never</WillReboot>
+					</RunSynchronousCommand>
+					<RunSynchronousCommand>
+						<Order>2</Order>
+						<Path>net user Administrator /fullname:"TweakingGuy"</Path>
+						<WillReboot>Never</WillReboot>
+					</RunSynchronousCommand>
+				</RunSynchronous>
+			</component>
+			<component name="Microsoft-Windows-Security-SPP-UX">
+				<SkipAutoActivation>true</SkipAutoActivation>
+			</component>
+			<component name="Microsoft-Windows-Shell-Setup">
+				<ComputerName>TweakingGuy</ComputerName>
+				<RegisteredOrganization>TweakingGuy</RegisteredOrganization>
+				<RegisteredOwner>TweakingGuy</RegisteredOwner>
+			</component>
+		</settings>
+		<settings pass="windowsPE">
+			<component name="Microsoft-Windows-International-Core-WinPE">
+				<InputLocale>0409:00000409</InputLocale>
+				<SystemLocale>en-US</SystemLocale>
+				<UILanguage>en-US</UILanguage>
+				<UILanguageFallback>en-US</UILanguageFallback>
+				<UserLocale>en-US</UserLocale>
+				<SetupUILanguage>
+					<UILanguage>en-US</UILanguage>
+				</SetupUILanguage>
+			</component>
+			<component name="Microsoft-Windows-Setup">
+				<Diagnostics>
+					<OptIn>false</OptIn>
+				</Diagnostics>
+				<DynamicUpdate>
+					<Enable>false</Enable>
+					<WillShowUI>OnError</WillShowUI>
+				</DynamicUpdate>
+				<ImageInstall>
+					<OSImage>
+						<Compact>true</Compact>
+						<WillShowUI>OnError</WillShowUI>
+						<InstallFrom>
+							<MetaData>
+								<Key>/IMAGE/INDEX</Key>
+								<Value>1</Value>
+							</MetaData>
+						</InstallFrom>
+					</OSImage>
+				</ImageInstall>
+				<UserData>
+					<AcceptEula>true</AcceptEula>
+					<FullName>TweakingGuy</FullName>
+					<ProductKey>
+						<Key></Key>
+					</ProductKey>
+				</UserData>
+			</component>
+		</settings>
+	</Unattended>
+	<Tweaks>
+		<Settings></Settings>
+		<Services></Services>
+		<ExtraServices></ExtraServices>
+		<ScheduledTasks></ScheduledTasks>
+	</Tweaks>
+	<ApplyOptions>
+		<ImageTasks>
+			<Task>imageSaveTrim</Task>
+			<Task>imageFormatWim</Task>
+			<Task>registry_boot.wim_01_2_64</Task>
+			<Task>registry_Winre.wim_01__64</Task>
+			<Task>imageOptionsCreateIso</Task>
+		</ImageTasks>
+		<AutoIsoFile>G:\WIN 11 ISO\1.4\1. updated + integrated 0 + features disabled.iso</AutoIsoFile>
+		<AutoIsoLabel>W11 x TweakingGuy</AutoIsoLabel>
+		<AutoSplitSize>4000</AutoSplitSize>
+		<CleanHotfixedLeftovers>0</CleanHotfixedLeftovers>
+		<OptimizeAppX>false</OptimizeAppX>
+		<ReuseDriverCache>false</ReuseDriverCache>
+	</ApplyOptions>
+	<Execution>
+		<Remove></Remove>
+		<Change></Change>
+		<Add></Add>
+	</Execution>
+	<Registry>
+		<File>G:\MY PERFECT ISO 2\REGISTRY\Reg_0_NTLite.reg</File>
+	</Registry>
+</Preset>
