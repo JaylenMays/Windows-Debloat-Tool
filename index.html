@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>AETHERIUM</title>
+<style>
+  html, body {
+    margin: 0; padding: 0; height: 100%; overflow: hidden;
+    background: #000; color: #dfe6ef;
+    font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  #scene {
+    display: block; position: fixed; inset: 0;
+    width: 100vw; height: 100vh; touch-action: none;
+  }
+  #ui { position: fixed; inset: 0; pointer-events: none; z-index: 10; }
+  #ui > * { pointer-events: auto; }
+  /* Shown only if the module fails to load or WebGL2 is unavailable. */
+  #fatal {
+    position: fixed; inset: 0; display: none; place-content: center; align-items: center;
+    text-align: center; padding: 8vh 6vw; z-index: 100; background: #05070a;
+  }
+  #fatal.on { display: grid; }
+  #fatal h1 { font-weight: 300; letter-spacing: .35em; font-size: 15px; color: #6f8296; margin: 0 0 18px; }
+  #fatal p { max-width: 46ch; margin: 0 auto; line-height: 1.65; color: #9fb0c2; font-size: 14px; }
+</style>
+</head>
+<body>
+  <canvas id="scene"></canvas>
+  <div id="ui"></div>
+  <div id="fatal">
+    <div>
+      <h1>LINK FAILED</h1>
+      <p id="fatal-msg">This build needs WebGL2. Try a current desktop build of Chrome, Edge, Firefox or Safari with hardware acceleration enabled.</p>
+    </div>
+  </div>
+
+  <script>
+    // Fail loudly and legibly rather than showing a black screen.
+    (function () {
+      var c = document.createElement('canvas');
+      var gl = c.getContext('webgl2');
+      if (!gl) {
+        document.getElementById('fatal').classList.add('on');
+        window.__fatal = 'no-webgl2';
+        return;
+      }
+      window.addEventListener('error', function (e) {
+        if (window.__ready) return;      // runtime errors are handled in-game
+        var f = document.getElementById('fatal');
+        document.getElementById('fatal-msg').textContent = String(e.message || e);
+        f.classList.add('on');
+      });
+    })();
+  </script>
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>

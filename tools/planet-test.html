@@ -1,0 +1,143 @@
+<!doctype html><html><head><meta charset="utf-8"><title>planet test</title>
+<style>html,body{margin:0;height:100%;background:#000;overflow:hidden}canvas{display:block;width:100vw;height:100vh}
+#log{position:fixed;left:8px;top:8px;color:#7fe;font:12px ui-monospace,monospace;white-space:pre;z-index:10}</style>
+</head><body><canvas id="c"></canvas><div id="log"></div>
+<script type="module">
+import * as THREE from '../vendor/three.module.js';
+import { Engine, LAYER } from '../src/core/engine.js';
+import { Sky } from '../src/render/sky.js';
+import { Planet } from '../src/world/planet.js';
+
+const errs = [];
+window.addEventListener('error', e => errs.push(e.message));
+
+const engine = new Engine(document.getElementById('c'), { quality: 'high' });
+engine.setAdaptive(false);
+
+const sky = new Sky(engine, { seed: 8.13, nebulaStrength: 0.22, starBrightness: 0.75, galaxyStrength: 0.7 });
+
+engine.post.params.autoExposure = false;
+engine.post.params.exposure = 1.0;
+engine.post.params.bloomStrength = 0.05;
+engine.post.params.grainAmount = 0.012;
+engine.post.params.vignetteAmount = 0.26;
+engine.post.params.chromaticAmount = 0.20;
+
+let planet = null;
+let type = 'terran';
+let seed = 20117;
+
+function build(t, s) {
+  if (planet) planet.dispose();
+  type = t; seed = s;
+  planet = new Planet(engine, { seed: s, radius: 6.371e6, type: t });
+  engine.scene.add(planet.group);
+  window.__planet = planet;
+}
+build(type, seed);
+
+// Camera orbit state ------------------------------------------------------
+let dist = 3.2;            // in planet radii, from the centre
+let camYaw = 0.0, camPitch = 0.12;
+let sunAz = 0.0, sunEl = 0.15;   // sun direction in world space
+let tiltX = 0, tiltY = 0;      // aim off the planet centre (for limb framings)
+const sunDir = new THREE.Vector3();
+const sunColor = new THREE.Color(1.0, 0.965, 0.92);
+
+window.__setDist = d => { dist = d; };
+window.__setCam = (yaw, pitch) => { camYaw = yaw; camPitch = pitch; };
+window.__setSun = (az, el) => { sunAz = az; sunEl = el; };
+window.__setTilt = (tx, ty) => { tiltX = tx; tiltY = ty; };
+window.__setType = (t, s) => build(t, s === undefined ? seed : s);
+window.__setExposure = v => { engine.post.params.exposure = v; };
+window.__setFov = f => engine.setFov(f);
+window.__show = (surf, cl, atm) => {
+  planet.surface.visible = surf;
+  if (planet.clouds) planet.clouds.visible = cl;
+  if (planet.atmosphere) planet.atmosphere.visible = atm;
+};
+window.__tune = o => { for (const k in o) if (planet.surfaceUniforms[k]) planet.surfaceUniforms[k].value = o[k]; };
+window.__setDebug = m => {
+  planet.surfaceUniforms.uDebug.value = m;
+  if (planet.clouds) planet.clouds.visible = !m;
+  if (planet.atmosphere) planet.atmosphere.visible = !m;
+};
+
+let frames = 0;
+
+function place() {
+  const R = planet.radius;
+  const r = dist * R;
+  const cp = Math.cos(camPitch);
+  engine.camera.position.set(
+    Math.sin(camYaw) * cp * r,
+    Math.sin(camPitch) * r,
+    Math.cos(camYaw) * cp * r);
+  engine.camera.up.set(0, 1, 0);
+  engine.camera.lookAt(0, 0, 0);
+  if (tiltX || tiltY) { engine.camera.rotateX(tiltX); engine.camera.rotateY(tiltY); }
+  engine.camera.updateMatrixWorld(true);
+
+  const ce = Math.cos(sunEl);
+  sunDir.set(Math.sin(sunAz) * ce, Math.sin(sunEl), Math.cos(sunAz) * ce).normalize();
+}
+
+window.__step = (n = 1) => {
+  for (let i = 0; i < n; i++) {
+    place();
+    sky.update(1 / 600, engine.camera, engine._size);
+    planet.update(1 / 600, engine.camera, sunDir, sunColor);
+    engine.render(1 / 60);
+    frames++;
+  }
+  document.getElementById('log').textContent =
+    `${type} seed ${seed}  dist ${dist.toFixed(2)}R  sun(${sunAz.toFixed(2)},${sunEl.toFixed(2)})  frames ${frames}  errs ${errs.length}  lod ${planet._detail}`;
+  return { frames, errors: errs.slice(0, 5) };
+};
+
+// -------------------------------------------------------------------------
+// sampleHeight (CPU) vs terrainField (GPU) agreement.
+// Renders the shader's own height field one texel per direction into a float
+// target and diffs it against the JS port.
+window.__probe = (n = 512) => {
+  const dirs = [];
+  // Deterministic Fibonacci sphere — even coverage, no clustering at the poles.
+  const ga = Math.PI * (3 - Math.sqrt(5));
+  for (let i = 0; i < n; i++) {
+    const y = 1 - (i / (n - 1)) * 2;
+    const r = Math.sqrt(Math.max(0, 1 - y * y));
+    const th = ga * i;
+    dirs.push(new THREE.Vector3(Math.cos(th) * r, y, Math.sin(th) * r));
+  }
+  const gpu = planet.probeHeightGPU(engine.renderer, dirs);
+  let maxAbs = 0, sumAbs = 0, maxRel = 0, worst = -1;
+  const errs2 = [];
+  let minV = Infinity, maxV = -Infinity;
+  for (let i = 0; i < n; i++) {
+    const cpu = planet.sampleField(dirs[i]);
+    minV = Math.min(minV, cpu); maxV = Math.max(maxV, cpu);
+    const d = Math.abs(cpu - gpu[i]);
+    errs2.push(d);
+    sumAbs += d;
+    if (d > maxAbs) { maxAbs = d; worst = i; }
+  }
+  const range = maxV - minV;
+  maxRel = maxAbs / range;
+  errs2.sort((a, b) => a - b);
+  const pct = q => errs2[Math.min(n - 1, Math.floor(q * n))];
+  return {
+    p50: pct(0.50), p99: pct(0.99),
+    over1e4: errs2.filter(d => d > 1e-4).length / n,
+    over1e3: errs2.filter(d => d > 1e-3).length / n,
+    n, maxAbsField: maxAbs, meanAbsField: sumAbs / n,
+    fieldRange: range, maxRelError: maxRel,
+    maxAbsMetres: maxAbs * planet.relief * planet.radius,
+    worstDir: worst >= 0 ? dirs[worst].toArray() : null,
+    sampleHeightMetresAtWorst: worst >= 0 ? planet.sampleHeight(dirs[worst]) : null,
+  };
+};
+
+window.__engine = engine;
+window.__sky = sky;
+window.__ready = true;
+</script></body></html>

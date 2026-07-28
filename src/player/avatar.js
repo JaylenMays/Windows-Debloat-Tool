@@ -598,7 +598,7 @@ export class Avatar {
     this.mesh.castShadow = true;
     this.mesh.receiveShadow = true;
     this.mesh.frustumCulled = false;
-    this.mesh.layers.set(LAYER.NEAR);
+    this.mesh.layers.set(LAYER.MID);
 
     this.group.clear();
     this.group.add(root);
@@ -845,7 +845,7 @@ export class Avatar {
       const eye = new THREE.Mesh(g, m);
       const yOff = base * (0.10);
       eye.position.set(headP.x + s * spacing, headP.y + yOff, headP.z + base * 0.80);
-      eye.layers.set(LAYER.NEAR);
+      eye.layers.set(LAYER.MID);
       eye.castShadow = false;
       this.group.add(eye);
       this.eyes.push(eye);
@@ -951,7 +951,7 @@ export class Avatar {
     };
     const mesh = new THREE.Mesh(g, m);
     mesh.castShadow = true;
-    mesh.layers.set(LAYER.NEAR);
+    mesh.layers.set(LAYER.MID);
     this.group.add(mesh);
     this.hair = mesh;
     this.engine.post.patchMaterial(m);
@@ -974,7 +974,7 @@ export class Avatar {
     shell.position.copy(headP);
     shell.scale.set(1.0, 1.06, 1.02);
     shell.castShadow = true;
-    shell.layers.set(LAYER.NEAR);
+    shell.layers.set(LAYER.MID);
     this.group.add(shell);
     this.helmet = shell;
     this.engine.post.patchMaterial(shell.material);
@@ -995,7 +995,7 @@ export class Avatar {
     const visor = new THREE.Mesh(visorGeo, visorMat);
     visor.position.copy(headP);
     visor.scale.set(1.0, 1.06, 1.02);
-    visor.layers.set(LAYER.NEAR);
+    visor.layers.set(LAYER.MID);
     this.group.add(visor);
     this.visor = visor;
 

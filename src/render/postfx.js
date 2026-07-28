@@ -102,11 +102,12 @@ export class PostFX {
     };
     this.params = {
       exposure: 1.0, exposureCompensation: 0.0, autoExposure: true,
+      autoExposureMin: 0.35, autoExposureMax: 5.0,
       bloomStrength: 0.045, bloomRadius: 1.0,
       grainAmount: 0.022, chromaticAmount: 0.28, vignetteAmount: 0.32,
       sharpen: 0.28, saturation: 1.02, contrast: 1.0,
       dofFocus: 12.0, dofRange: 24.0, dofStrength: 0.0,
-      motionBlurStrength: 0.55,
+      motionBlurStrength: 0.32,
       fogDensity: 0.0, fogHeight: 220.0, fogAmbient: 0.05, fogMaxDist: 2000.0, fogColor: new THREE.Color(0.5, 0.62, 0.78),
       sunScreenPos: new THREE.Vector2(0.5, 0.5), sunVisibility: 0.0,
       sunColor: new THREE.Color(1, 0.96, 0.9),
@@ -588,10 +589,10 @@ export class PostFX {
         vec2 vel = (vUv - prevUv) * uStrength;
         float len = length(vel);
         if(len < 0.0008){ gl_FragColor = texture2D(tSource, vUv); return; }
-        vel = normalize(vel) * min(len, 0.045);
+        vel = normalize(vel) * min(len, 0.018);
         float jitter = ign(gl_FragCoord.xy + uFrame * 5.0);
         vec3 sum = vec3(0.0);
-        const int N = 12;
+        const int N = 16;
         for(int i = 0; i < N; i++){
           float t = (float(i) + jitter) / float(N) - 0.5;
           sum += texture2D(tSource, vUv - vel * t).rgb;
@@ -670,6 +671,7 @@ export class PostFX {
       tVolumetric: { value: null },
       uResolution: { value: new THREE.Vector2() },
       uExposure: { value: 1.0 }, uExposureComp: { value: 0.0 }, uAutoExposure: { value: 1.0 },
+      uAutoMin: { value: 0.35 }, uAutoMax: { value: 5.0 },
       uBloomStrength: { value: 0.06 },
       uChromatic: { value: 0.3 }, uVignette: { value: 0.35 }, uGrain: { value: 0.02 },
       uSharpen: { value: 0.3 }, uSaturation: { value: 1.0 }, uContrast: { value: 1.0 },
@@ -687,6 +689,7 @@ export class PostFX {
       uniform sampler2D tScene, tBloom, tLum, tVolumetric;
       uniform vec2 uResolution;
       uniform float uExposure, uExposureComp, uAutoExposure, uBloomStrength;
+      uniform float uAutoMin, uAutoMax;
       uniform float uChromatic, uVignette, uGrain, uSharpen, uSaturation, uContrast;
       uniform float uTime, uVolStrength, uFadeAmount, uLetterbox;
       uniform vec3 uFadeColor, uLift, uGamma, uGain;
@@ -726,7 +729,7 @@ export class PostFX {
         float autoEv = 0.18 / max(avgLum, 1e-4);
         // Deliberately narrow. Wide auto-exposure ranges read as "video game
         // auto-brightness"; real cameras don't swing 24 stops between shots.
-        autoEv = clamp(autoEv, 0.35, 5.0);
+        autoEv = clamp(autoEv, uAutoMin, uAutoMax);
         float exposure = uExposure * mix(1.0, autoEv, uAutoExposure) * pow(2.0, uExposureComp);
         color *= exposure;
 
@@ -1004,7 +1007,15 @@ export class PostFX {
         this.mCopy.uniforms.tSource.value = tmp.texture;
         this.quad.render(r, this.mCopy, mips[i - 1]);
       }
-      bloomTex = mips[0].texture;
+      // Take the bloom from the SECOND mip, not the first.
+      //
+      // mips[0] is only a 13-tap half-res filter of the frame, so it still
+      // holds near-sharp detail. Adding it back re-composites a faint copy of
+      // the image over itself — which with very bright HDR sources (stars at
+      // ~9.0) shows up as hard dots scattered across the whole frame,
+      // including on top of opaque geometry. Starting one octave down keeps
+      // the glow soft and energy-conserving.
+      bloomTex = mips[Math.min(1, mips.length - 1)].texture;
     }
 
     /* --- 10. composite ------------------------------------------------------ */
@@ -1017,6 +1028,8 @@ export class PostFX {
     u.uExposure.value = p.exposure;
     u.uExposureComp.value = p.exposureCompensation;
     u.uAutoExposure.value = p.autoExposure ? 1 : 0;
+    u.uAutoMin.value = p.autoExposureMin ?? 0.35;
+    u.uAutoMax.value = p.autoExposureMax ?? 5.0;
     u.uBloomStrength.value = this.enabled.bloom ? p.bloomStrength : 0;
     u.uChromatic.value = this.enabled.chromatic ? p.chromaticAmount : 0;
     u.uVignette.value = this.enabled.vignette ? p.vignetteAmount : 0;

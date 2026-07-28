@@ -75,11 +75,21 @@ export const LAYER = {
   FX:    5,   // additive FX that must not write depth
 };
 
+// MID must start close to the eye: in third person the ground directly under
+// the camera is well inside a 4 m near plane, and clipping it punches a hole
+// straight through to the starfield.
+//
+// It must also hold anything that can be MUTUALLY occluded with the terrain —
+// the avatar included. Depth is cleared between layers, so a nearer layer
+// always wins regardless of true depth; splitting the character onto NEAR
+// would draw them through any hill standing between them and the camera.
+// NEAR is therefore reserved for geometry that is guaranteed closest: first
+// person hands, cockpit interiors, screen-space props.
 const LAYER_RANGES = {
   [LAYER.DEEP]: [1e6, 1e13],
   [LAYER.FAR]:  [5e2, 1e9],
-  [LAYER.MID]:  [4.0, 4e5],
-  [LAYER.NEAR]: [0.05, 600],
+  [LAYER.MID]:  [0.25, 3e4],
+  [LAYER.NEAR]: [0.05, 12],
 };
 
 // Halton(2,3) — low-discrepancy jitter sequence for TAA sub-pixel sampling.

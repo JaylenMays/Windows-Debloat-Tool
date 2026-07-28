@@ -28,11 +28,27 @@ import { LAYER } from '../core/engine.js';
  *
  * Deliberately a line-by-line transliteration rather than a "better" JS
  * simplex: the permutation chain stays inside float32's exact-integer
- * range, so both implementations walk the identical lattice and only the
- * final gradient dot products differ, by a few ULPs.
+ * range, so both implementations walk the identical lattice.
+ *
+ * One place needs actual float32 emulation rather than a transliteration.
+ * The gradient lookup does `floor(j * ns.z)` with ns.z = 0.142857142857 —
+ * a literal that is *below* 1/7 in double precision but rounds to just
+ * *above* 1/7 as a float32. In GLSL, j = 7 therefore floors to 1; in plain
+ * JS doubles it floors to 0, and roughly one lattice point in seven picks a
+ * different gradient. The result still looks like noise (which is why this
+ * kind of bug survives a visual check) but it is a different field. So the
+ * few operations whose results feed a floor() are rounded with Math.fround
+ * in exactly the order GLSL evaluates them.
  * ------------------------------------------------------------------ */
 
 const C1 = 1.0 / 6.0, C2 = 1.0 / 3.0;
+const F = Math.fround;
+
+// float32 image of the literals in glsl.js's snoise3
+const N7 = F(0.142857142857);
+const NSX = F(N7 * 2.0);
+const NSY = F(F(N7 * 0.5) - 1.0);
+const NSZ = N7;
 
 function mod289(x) { return x - Math.floor(x * (1.0 / 289.0)) * 289.0; }
 function permute(x) { return mod289(((x * 34.0) + 1.0) * x); }
@@ -72,17 +88,14 @@ export function snoise3(vx, vy, vz) {
     _pk[k] = v;
   }
 
-  const n_ = 0.142857142857;
-  const nsx = n_ * 2.0, nsy = n_ * 0.5 - 1.0, nsz = n_ * 1.0;
-  const nz2 = nsz * nsz;
-
   for (let k = 0; k < 4; k++) {
-    const j = _pk[k] - 49.0 * Math.floor(_pk[k] * nz2);
-    const xf = Math.floor(j * nsz);
+    // GLSL evaluates `p * ns.z * ns.z` left to right, in float32.
+    const j = _pk[k] - 49.0 * Math.floor(F(F(_pk[k] * NSZ) * NSZ));
+    const xf = Math.floor(F(j * NSZ));
     const yf = Math.floor(j - 7.0 * xf);
-    const xx = xf * nsx + nsy;
-    const yy = yf * nsx + nsy;
-    const hh = 1.0 - Math.abs(xx) - Math.abs(yy);
+    const xx = F(F(xf * NSX) + NSY);
+    const yy = F(F(yf * NSX) + NSY);
+    const hh = F(F(1.0 - Math.abs(xx)) - Math.abs(yy));
     const sh = hh <= 0.0 ? -1.0 : 0.0;
     let px = xx + (Math.floor(xx) * 2.0 + 1.0) * sh;
     let py = yy + (Math.floor(yy) * 2.0 + 1.0) * sh;
@@ -170,6 +183,7 @@ function makeFieldParams(seed, type, tuning = {}) {
 
     moistFreq: 1.6 + rnd() * 0.5,
     tempFreq: 2.3 + rnd() * 0.5,
+    tempBias: 0.0,
     maxElev: 1.15,
   };
   Object.assign(P, tuning);
@@ -203,14 +217,21 @@ float terrainField(vec3 dir){
 // Climate fields. Low frequency, so they are evaluated per-vertex and
 // interpolated; the fragment shader never pays for them.
 void climateField(vec3 dir, float elev, out float moist, out float temp){
-  float m = fbm3(dir * ${g(P.moistFreq)} + ${gv(o[12], o[13], o[14])}, 3, 2.0, 0.5) * 0.5 + 0.5;
+  // fbm3 is a normalised weighted mean, so its practical range is only about
+  // +-0.2 — without the gain the climate would be pure latitude banding.
+  float m = clamp(fbm3(dir * ${g(P.moistFreq)} + ${gv(o[12], o[13], o[14])}, 3, 2.0, 0.5) * 2.3 + 0.5, 0.0, 1.0);
+  // |dir.y| is sin(latitude): 0.5 is 30 degrees, 0.87 is 60.
   float lat = abs(dir.y);
-  // Wet tropics + wet temperate belt, dry horse latitudes at ~30 degrees.
-  float zonal = 0.62 - 0.55 * smoothstep(0.10, 0.48, lat) + 0.40 * smoothstep(0.55, 0.92, lat);
-  moist = clamp(m * 0.62 + zonal * 0.55 - 0.18 - max(elev, 0.0) * 0.22, 0.0, 1.0);
-  float t = fbm3(dir * ${g(P.tempFreq)} + ${gv(o[15], o[16], o[17])}, 2, 2.0, 0.5);
+  // Hadley circulation, not a linear ramp. Air rises wet at the equator,
+  // descends bone dry over the subtropics (every big desert on Earth sits
+  // at ~25-30 degrees) and rises again along the polar front.
+  float dry = (lat - 0.48) / 0.19;
+  float wet = lat / 0.22;
+  float zonal = 0.75 - 0.78 * exp(-dry * dry) + 0.28 * exp(-wet * wet);
+  moist = clamp(m * 0.86 + zonal * 0.46 - 0.13 - max(elev, 0.0) * 0.26, 0.0, 1.0);
+  float t = fbm3(dir * ${g(P.tempFreq)} + ${gv(o[15], o[16], o[17])}, 2, 2.0, 0.5) * 2.0;
   // Insolation falls off with latitude; lapse rate cools high ground.
-  temp = clamp(1.02 - 1.28 * pow(lat, 1.45) - max(elev, 0.0) * 0.55 + t * 0.10, 0.0, 1.0);
+  temp = clamp(1.0 - 0.95 * pow(lat, 1.8) - max(elev, 0.0) * 0.50 + t * 0.09 + (${g(P.tempBias)}), 0.0, 1.0);
 }
 `;
 }
@@ -252,29 +273,54 @@ vec3 spin(vec3 d, float a){
 // as static; real atmospheres are organised into zonal bands by rotation
 // and sheared into cyclonic streaks by the latitudinal velocity gradient,
 // so both are applied to the *domain* before any detail is added.
+// Zonal weather structure, shared by both variants. Returns a coverage
+// multiplier: the ITCZ and the mid-latitude storm tracks are cloudy, the
+// subtropical highs and the poles comparatively clear.
+float cloudBands(vec3 ds, float lat){
+  float wob = fbm3(ds * 0.9 + 4.3, 3, 2.0, 0.5);
+  float l = lat + wob * 0.13;
+  float itcz = exp(-(l / 0.15) * (l / 0.15));
+  float dry = (abs(l) - 0.46) / 0.19;
+  float track = (abs(l) - 0.76) / 0.24;
+  return 0.72 + 0.55 * itcz - 0.40 * exp(-dry * dry) + 0.42 * exp(-track * track);
+}
+
+// Weather *systems* — the low-frequency mask that separates one cloud mass
+// from the next. Without it every octave contributes at every scale and the
+// result is a uniform fizz of noise instead of discrete storms.
+float cloudSystems(vec3 ds){
+  float s = fbm3(ds * 1.25 + 31.7, 3, 2.05, 0.55) * 2.4 + 0.5;
+  return smoothstep(0.18, 0.78, s);
+}
+
 float cloudField(vec3 dir, int oct){
   vec3 d = spin(dir, uCloudTime * 0.012);
   float lat = d.y;
 
-  // Differential rotation: each latitude is rotated by a different angle,
-  // which drags the noise out into the streaks and hooks of a weather map.
-  float shear = lat * 2.6 + sin(lat * 5.0) * 0.9;
-  vec3 ds = spin(d, shear);
-
-  // Zonal bands (ITCZ + mid-latitude storm tracks), themselves wavy.
-  float bandN = fbm3(ds * 1.1 + 4.3, 3, 2.0, 0.5);
-  float bands = 0.5 + 0.5 * sin(lat * 8.5 + bandN * 2.6);
+  // Differential rotation. Each latitude is dragged by a different angle,
+  // which is what pulls cloud masses into the hooks and comma shapes of a
+  // weather map instead of leaving isotropic blobs.
+  vec3 ds = spin(d, lat * 0.34 + sin(lat * 3.1) * 0.16);
 
   vec3 q = ds * uCloudFreq;
+  // Heavy domain warp at a *lower* frequency than the detail: this is what
+  // produces coherent cyclonic swirls rather than uniform noise.
   vec3 w = vec3(
-    fbm3(q + 1.7, 3, 2.0, 0.5),
-    fbm3(q + 9.2, 3, 2.0, 0.5),
-    fbm3(q + 5.5, 3, 2.0, 0.5));
-  float n = fbm3(q + w * 1.7, oct, 2.2, 0.55) * 0.5 + 0.5;
+    fbm3(q * 0.40 + 1.7, 3, 2.0, 0.5),
+    fbm3(q * 0.40 + 9.2, 3, 2.0, 0.5),
+    fbm3(q * 0.40 + 5.5, 3, 2.0, 0.5));
+  float n = fbm3(q + w * 2.6, oct, 2.35, 0.52) * 1.55 + 0.5;
+  // Billowy edges: a high-frequency term added to the *coverage*, not to the
+  // shape, so cloud masses keep their silhouette but stop looking cut out.
+  n += fbm3(q * 3.4 + 13.0, 3, 2.4, 0.5) * 0.26;
 
-  float cover = n * mix(0.72, 1.30, bands);
-  float thr = 1.0 - uCloudCover;
-  return smoothstep(thr, thr + 0.20, cover);
+  // Additive composition. Multiplying the masks together made coverage
+  // collapse non-linearly and turned the isocontours into thin slivers.
+  float cover = n + (cloudSystems(ds) - 0.5) * 0.55 + (cloudBands(ds, lat) - 1.0) * 0.45;
+  // Beer-Lambert on a continuous optical thickness rather than a threshold.
+  // A smoothstepped mask saturates almost everywhere and paints flat white
+  // blobs; this keeps a soft, tonally graded edge on every cloud mass.
+  return 1.0 - exp(-max(cover - (1.0 - uCloudCover), 0.0) * 8.0);
 }
 
 // Cheap variant for the shadow tap: no domain warp, fewer octaves. Keeps
@@ -282,14 +328,10 @@ float cloudField(vec3 dir, int oct){
 float cloudFieldCheap(vec3 dir){
   vec3 d = spin(dir, uCloudTime * 0.012);
   float lat = d.y;
-  float shear = lat * 2.6 + sin(lat * 5.0) * 0.9;
-  vec3 ds = spin(d, shear);
-  float bandN = fbm3(ds * 1.1 + 4.3, 2, 2.0, 0.5);
-  float bands = 0.5 + 0.5 * sin(lat * 8.5 + bandN * 2.6);
-  float n = fbm3(ds * uCloudFreq, 3, 2.2, 0.55) * 0.5 + 0.5;
-  float cover = n * mix(0.72, 1.30, bands);
-  float thr = 1.0 - uCloudCover;
-  return smoothstep(thr, thr + 0.24, cover);
+  vec3 ds = spin(d, lat * 0.34 + sin(lat * 3.1) * 0.16);
+  float n = fbm3(ds * uCloudFreq, 3, 2.35, 0.52) * 1.55 + 0.5;
+  float cover = n + (cloudSystems(ds) - 0.5) * 0.55 + (cloudBands(ds, lat) - 1.0) * 0.45;
+  return 1.0 - exp(-max(cover - (1.0 - uCloudCover), 0.0) * 7.0);
 }
 `;
 
@@ -392,6 +434,8 @@ uniform vec3  uAmbient;
 uniform vec3 uColDeep, uColShallow, uColBeach, uColDesert, uColSavanna;
 uniform vec3 uColForest, uColTundra, uColRock, uColSnow;
 uniform float uOceanRough, uLandRough;
+uniform float uDebug;
+uniform float uLavaGlow;
 
 varying vec3  vDir;
 varying vec3  vNrm;
@@ -424,15 +468,20 @@ void main(){
 
   // Per-fragment detail: normal perturbation from a mid-frequency fBm,
   // faded out with distance so a full-disc view never pays for it.
+  //
+  // The finite-difference step is taken in *noise* space, not in radians, so
+  // it always straddles a constant fraction of a wavelength however the
+  // frequency is scaled with distance. A fixed angular step either misses
+  // the field entirely at high frequency or smears it at low.
   if(uDetailAmt > 0.002){
     vec3 T = normalize(vTan), B = normalize(vBit);
     vec3 dp = dirN * uDetailFreq;
-    float de = 0.02 * uDetailFreq;
-    float n0 = fbm3(dp, 3, 2.2, 0.5);
-    float nx = fbm3(dp + T * de, 3, 2.2, 0.5);
-    float ny = fbm3(dp + B * de, 3, 2.2, 0.5);
-    mottle = n0;
-    N = normalize(N - (T * (nx - n0) + B * (ny - n0)) * uDetailAmt);
+    const float de = 0.55;
+    float n0 = fbm3(dp, 3, 2.25, 0.5);
+    float nx = fbm3(dp + T * de, 3, 2.25, 0.5);
+    float ny = fbm3(dp + B * de, 3, 2.25, 0.5);
+    mottle = n0 * 2.4;
+    N = normalize(N - (T * (nx - n0) + B * (ny - n0)) * uDetailAmt * 2.1);
   }
 
   float slope = 1.0 - clamp(dot(N, dirN), 0.0, 1.0);
@@ -442,22 +491,37 @@ void main(){
   vec3  albedo;
   float rough;
   float f0 = 0.04;
-  float ocean = 0.0;
 
 #ifdef GASGIANT
-  // Zonal bands: noise stretched hard in longitude, plus ridged vortices.
-  vec3 bp = vec3(dirN.x, dirN.y * 7.0, dirN.z) * 1.6 + uTime * 0.004;
-  float bn = fbm3(bp, 5, 2.1, 0.55);
-  float band = sin(dirN.y * 15.0 + bn * 2.2);
-  vec3 c = mix(uColDesert, uColSavanna, 0.5 + 0.5 * band);
-  c = mix(c, uColBeach, smoothstep(0.35, 0.85, ridged3(bp * 0.9 + 21.0, 4, 2.2, 0.5)));
-  c = mix(c, uColSnow, smoothstep(0.55, 0.95, lat));
+  // Zonal belts. Turbulence is generated in a domain compressed hard in
+  // latitude and stretched in longitude, so eddies shear out along the
+  // bands the way they do on a real gas giant instead of forming blobs.
+  vec3 tp = vec3(dirN.x, dirN.y * 8.0, dirN.z) * 2.1;
+  float turb = fbm3(tp + uTime * 0.008, 5, 2.15, 0.55);
+  float yb = dirN.y + turb * 0.055;
+
+  // A 1-D fBm across latitude gives belts of *unequal* width, which is what
+  // stops the banding reading as a sine wave.
+  float belt = fbm3(vec3(11.0, yb * 21.0, 4.0), 4, 2.0, 0.52) * 2.0 + 0.5;
+  vec3 c = mix(uColDesert, uColSavanna, smoothstep(0.25, 0.75, belt));
+  c = mix(c, uColRock, smoothstep(0.72, 0.20, belt));
+  c = mix(c, uColSnow, smoothstep(0.62, 0.96, lat));
+
+  // One great oval storm, elliptical in lon/lat and wound by its own shear.
+  float lon = atan(dirN.z, dirN.x);
+  float dlon = lon - 1.05;
+  dlon -= 6.28318530 * floor(dlon / 6.28318530 + 0.5);
+  float dlat = asin(clamp(dirN.y, -1.0, 1.0)) + 0.34;
+  float sd = length(vec2(dlon / 0.62, dlat / 0.20));
+  float storm = smoothstep(1.05, 0.35, sd);
+  float swirl = fbm3(vec3(dlon * 5.0, dlat * 14.0, 3.0) + turb, 4, 2.2, 0.5) * 2.0 + 0.5;
+  c = mix(c, uColBeach * mix(0.75, 1.15, swirl), storm);
+
   albedo = c;
   rough = 0.9;
 #else
   #ifdef HAS_OCEAN
   if(vElev <= 0.0){
-    ocean = 1.0;
     float depth = clamp(-vElev / 0.55, 0.0, 1.0);
     // Shallow shelves scatter off the bottom and read green; the abyss is
     // nearly black and only visible through its specular.
@@ -499,7 +563,7 @@ void main(){
   }
 #endif
 
-  albedo *= 0.86 + 0.28 * (mottle * 0.5 + 0.5);
+  albedo *= clamp(0.86 + 0.28 * (mottle * 0.5 + 0.5), 0.72, 1.25);
 
   /* ---------------- direct lighting ---------------- */
   float ndlG = dot(dirN, L);           // geometric — drives the terminator
@@ -513,7 +577,7 @@ void main(){
   float shadow = 1.0;
   if(uCloudShadow > 0.001 && ndlG > -0.1){
     // Where does the sun ray from this point pierce the cloud deck?
-    vec3 p = dirN * (1.0 + max(vElev, 0.0) * 0.0);
+    vec3 p = dirN;
     float bq = dot(p, L);
     float cc = dot(p, p) - uCloudShellR * uCloudShellR;
     float hq = bq * bq - cc;
@@ -542,7 +606,7 @@ void main(){
 
   // Ambient: sky-scattered light on the day side only, plus a whisper of
   // starlight so the night side is not mathematically black.
-  col += albedo * uAmbient * (0.25 + 0.75 * clamp(ndlG * 2.0, 0.0, 1.0));
+  col += albedo * uAmbient * (0.05 + 0.95 * clamp(ndlG * 2.0, 0.0, 1.0));
 
   /* ---------------- atmospheric extinction ---------------- */
   // Ground seen through a long slant path loses blue first — this is what
@@ -553,29 +617,57 @@ void main(){
     float chap = 1.0 / max(mu, 0.02);
     float muL = clamp(ndlG, 0.0, 1.0);
     float chapL = 1.0 / max(muL, 0.02);
-    vec3 tau = uBetaR * uHr * (chap + chapL) * uAtmDensity;
+    // Scaled below the pure single-scattering value: photons scattered out
+    // of the beam largely come back through multiple scattering, which a
+    // single-scattering model cannot represent and would otherwise leave the
+    // whole disc looking jaundiced.
+    vec3 tau = uBetaR * uHr * (chap + chapL) * uAtmDensity * 0.70;
     col *= exp(-tau);
   }
 
+  /* ---------------- molten rock ---------------- */
+#ifdef LAVA
+  // Fissure network: ridged noise gives the branching cracks, and it is
+  // gated to low ground because lava pools, it does not sit on peaks.
+  {
+    float fis = ridged3(dirN * 7.5 + 3.3, 4, 2.3, 0.5);
+    float lava = smoothstep(0.62, 0.93, fis) * (1.0 - smoothstep(-0.05, 0.30, vElev));
+    lava *= 0.35 + 0.65 * (fbm3(dirN * 30.0 + 8.1, 2, 2.2, 0.5) * 0.5 + 0.5);
+    col += vec3(4.0, 0.70, 0.055) * lava * lava * uLavaGlow;
+  }
+#endif
+
   /* ---------------- night side city lights ---------------- */
 #ifdef HAS_CITY
-  if(uNightLights > 0.001 && ndlG < 0.14 && vElev > 0.004){
+  if(uNightLights > 0.001 && ndlG < 0.04 && vElev > 0.004){
     // Habitability: temperate, not too dry, not too high, near the coast.
     float hab = smoothstep(0.30, 0.55, vTemp) * (1.0 - smoothstep(0.72, 0.95, vTemp));
     hab *= smoothstep(0.16, 0.42, vMoist);
     hab *= 1.0 - smoothstep(0.28, 0.62, alt);
     hab *= 1.0 - smoothstep(0.20, 0.45, slope);
     if(hab > 0.01){
-      // Two scales: conurbations, then individual light clusters inside.
-      float region = fbm3(dirN * 9.0 + 313.0, 3, 2.2, 0.5) * 0.5 + 0.5;
-      float cluster = smoothstep(0.56, 0.82, region);
-      float spark = fbm3(dirN * 260.0 + 71.0, 2, 2.4, 0.5) * 0.5 + 0.5;
-      float lights = cluster * hab * pow(clamp(spark, 0.0, 1.0), 7.0) * 6.0;
-      float night = smoothstep(0.14, -0.06, ndlG);
+      // Three scales, because that is how settlement actually looks from
+      // orbit: a few populated regions, conurbations inside them, and then
+      // individual towns strung along the coasts and valleys between.
+      float region = fbm3(dirN * 5.0 + 313.0, 3, 2.2, 0.5) * 2.2 + 0.5;
+      float conurb = fbm3(dirN * 19.0 + 121.0, 3, 2.2, 0.5) * 2.0 + 0.5;
+      float cluster = smoothstep(0.42, 0.85, region) * smoothstep(0.30, 0.90, conurb);
+      float spark = fbm3(dirN * 620.0 + 71.0, 3, 2.45, 0.5) * 1.9 + 0.5;
+      float lights = cluster * hab * pow(clamp(spark, 0.0, 1.0), 5.0) * 9.0;
+      // Cities are invisible in twilight; they only emerge once the sun is
+      // properly below the horizon.
+      float night = smoothstep(0.02, -0.16, ndlG);
       col += uNightColor * lights * uNightLights * night;
     }
   }
 #endif
+
+  if(uDebug > 0.5){
+    if(uDebug < 1.5) col = vec3(vMoist) * 0.35;
+    else if(uDebug < 2.5) col = vec3(vTemp) * 0.35;
+    else if(uDebug < 3.5) col = vec3(clamp(vElev, 0.0, 1.0), clamp(-vElev, 0.0, 1.0), 0.0) * 0.35;
+    else col = albedo * 2.0;
+  }
 
   gl_FragColor = vec4(max(col, 0.0), 1.0);
 }
@@ -635,13 +727,17 @@ void main(){
   float fwd = miePhase(mu, 0.62) * 3.0;
   float thin = 1.0 - dens;
 
+  // Cloud albedo ~0.7, Lambertian: radiance = albedo * E * cos / pi. Thin
+  // cloud is dimmer as well as more transparent — multiple scattering needs
+  // depth to build up, which is why an overcast deck is brighter than a wisp.
+  float thick = 0.45 + 0.55 * dens;
   vec3 sun = uSunColor * uSunI;
-  vec3 col = uTint * sun * (lit * 0.30 + 0.02);
-  col += uTint * sun * fwd * (0.10 + 0.55 * thin * thin) * lit;
+  vec3 col = uTint * sun * lit * (0.225 * thick + 0.012);
+  col += uTint * sun * fwd * (0.10 + 0.75 * thin * thin) * lit;
   col = mix(col, col * vec3(1.35, 0.92, 0.68), warm * 0.7);
 
   // A touch of blue bounce from the sky beneath.
-  col += vec3(0.05, 0.09, 0.16) * lit * 0.35;
+  col += vec3(0.05, 0.09, 0.16) * lit * lit * 0.35;
 
   float alpha = dens * uOpacity;
   alpha *= 0.35 + 0.65 * smoothstep(-0.25, 0.05, ndl);   // night clouds fade out
@@ -758,7 +854,11 @@ void main(){
     // terminator into a gradient instead of a knife edge.
     float projL = dot(p, L);
     float perp = length(p - L * projL);
-    float shadow = projL > 0.0 ? 1.0 : smoothstep(1.0 - 0.004, 1.0 + 0.030, perp);
+    // The penumbra is wider than pure geometry: the star has a finite disc
+    // (~0.5 degrees) and refraction bends light around the limb. A hard
+    // umbra edge here is what gives cheap planet shaders their tell-tale
+    // razor terminator.
+    float shadow = projL > 0.0 ? 1.0 : smoothstep(0.982, 1.048, perp);
 
     float lodR = 0.0, lodM = 0.0;
     if(shadow > 0.001){
@@ -833,18 +933,18 @@ const TYPES = {
     hasOcean: true, hasClouds: true, hasCityLights: true, atmosphere: true,
     palette: {
       deep: C(0.0035, 0.0105, 0.0330), shallow: C(0.020, 0.078, 0.088),
-      beach: C(0.330, 0.278, 0.185), desert: C(0.400, 0.300, 0.172),
-      savanna: C(0.230, 0.205, 0.092), forest: C(0.042, 0.070, 0.030),
+      beach: C(0.330, 0.278, 0.185), desert: C(0.345, 0.262, 0.150),
+      savanna: C(0.205, 0.180, 0.082), forest: C(0.052, 0.086, 0.038),
       tundra: C(0.150, 0.140, 0.110), rock: C(0.105, 0.098, 0.088),
       snow: C(0.760, 0.790, 0.830),
     },
     tint: C(0.42, 0.62, 1.00), cloudTint: C(1.0, 0.99, 0.98),
-    cloudCover: 0.46, relief: 0.0038, oceanRough: 0.055, landRough: 0.82,
+    cloudCover: 0.36, relief: 0.0038, oceanRough: 0.16, landRough: 0.82,
     atmDensity: 1.0,
   },
   desert: {
     hasOcean: false, hasClouds: true, hasCityLights: false, atmosphere: true,
-    field: { seaLevel: -0.02, detailAmp: 0.16 },
+    field: { seaLevel: -0.02, detailAmp: 0.16, tempBias: 0.22 },
     palette: {
       deep: C(0.09, 0.055, 0.032), shallow: C(0.13, 0.08, 0.05),
       beach: C(0.30, 0.20, 0.12), desert: C(0.290, 0.165, 0.082),
@@ -852,13 +952,17 @@ const TYPES = {
       tundra: C(0.225, 0.155, 0.105), rock: C(0.135, 0.082, 0.050),
       snow: C(0.520, 0.470, 0.420),
     },
-    tint: C(1.00, 0.58, 0.36), cloudTint: C(0.95, 0.78, 0.62),
+    tint: C(1.00, 0.58, 0.36), cloudTint: C(0.92, 0.80, 0.70),
     cloudCover: 0.14, relief: 0.0060, oceanRough: 0.8, landRough: 0.92,
-    atmDensity: 0.16, cloudOpacity: 0.45,
+    atmDensity: 0.16, cloudOpacity: 0.40,
+    // Suspended dust, not clean air: Mie dominates and the Rayleigh
+    // coefficients invert, which is why a Martian sky is butterscotch by day
+    // and blue only around the setting sun.
+    scatter: { rayleigh: [11.0e-6, 7.5e-6, 5.0e-6], mie: 85e-6, g: 0.62 },
   },
   ice: {
     hasOcean: true, hasClouds: true, hasCityLights: false, atmosphere: true,
-    field: { seaLevel: 0.02 },
+    field: { seaLevel: 0.02, tempBias: -0.42 },
     palette: {
       deep: C(0.045, 0.090, 0.135), shallow: C(0.240, 0.360, 0.430),
       beach: C(0.560, 0.610, 0.660), desert: C(0.520, 0.560, 0.610),
@@ -868,11 +972,11 @@ const TYPES = {
     },
     tint: C(0.55, 0.72, 1.00), cloudTint: C(1.0, 1.0, 1.0),
     cloudCover: 0.40, relief: 0.0030, oceanRough: 0.35, landRough: 0.55,
-    atmDensity: 0.45, coldShift: 0.55,
+    atmDensity: 0.45,
   },
   volcanic: {
     hasOcean: false, hasClouds: true, hasCityLights: false, atmosphere: true,
-    field: { seaLevel: -0.05, mountAmp: 1.05 },
+    field: { seaLevel: -0.05, mountAmp: 1.05, tempBias: 0.30 },
     palette: {
       deep: C(0.35, 0.06, 0.010), shallow: C(0.50, 0.10, 0.015),
       beach: C(0.075, 0.062, 0.058), desert: C(0.060, 0.050, 0.046),
@@ -883,6 +987,8 @@ const TYPES = {
     tint: C(1.00, 0.42, 0.20), cloudTint: C(0.55, 0.42, 0.38),
     cloudCover: 0.30, relief: 0.0075, oceanRough: 0.5, landRough: 0.95,
     atmDensity: 0.55, cloudOpacity: 0.7,
+    scatter: { rayleigh: [26.0e-6, 11.0e-6, 5.0e-6], mie: 70e-6, g: 0.70 },
+    lavaGlow: 1.0,
   },
   barren: {
     hasOcean: false, hasClouds: false, hasCityLights: false, atmosphere: false,
@@ -901,15 +1007,16 @@ const TYPES = {
   gasgiant: {
     hasOcean: false, hasClouds: false, hasCityLights: false, atmosphere: true,
     palette: {
-      deep: C(0.10, 0.08, 0.07), shallow: C(0.30, 0.22, 0.16),
-      beach: C(0.62, 0.34, 0.20), desert: C(0.480, 0.400, 0.300),
-      savanna: C(0.680, 0.610, 0.480), forest: C(0.40, 0.34, 0.26),
-      tundra: C(0.50, 0.44, 0.36), rock: C(0.30, 0.26, 0.20),
-      snow: C(0.640, 0.660, 0.700),
+      deep: C(0.10, 0.08, 0.07), shallow: C(0.20, 0.15, 0.11),
+      beach: C(0.480, 0.215, 0.130), desert: C(0.300, 0.238, 0.172),
+      savanna: C(0.520, 0.462, 0.362), forest: C(0.28, 0.24, 0.18),
+      tundra: C(0.36, 0.32, 0.26), rock: C(0.205, 0.150, 0.112),
+      snow: C(0.330, 0.352, 0.400),
     },
     tint: C(0.75, 0.80, 0.95), cloudTint: C(1, 1, 1),
     cloudCover: 0.0, relief: 0.0, oceanRough: 0.9, landRough: 0.9,
-    atmDensity: 2.2,
+    atmDensity: 0.85,
+    scatter: { rayleigh: [7.0e-6, 12.0e-6, 26.0e-6], mie: 40e-6, g: 0.70 },
   },
 };
 
@@ -948,6 +1055,7 @@ export class Planet {
       rayleigh: [5.8e-6, 13.5e-6, 33.1e-6],
       mie: 21e-6,
       g: 0.76,
+    }, T.scatter || {}, {
       scaleHeightR: 8000.0,
       scaleHeightM: 1200.0,
       density: T.atmDensity,
@@ -991,7 +1099,7 @@ export class Planet {
     this.surfaceUniforms = {
       uRadius: { value: R },
       uRelief: { value: this.relief },
-      uNormalBoost: { value: this.isGas ? 0 : 4.0 },
+      uNormalBoost: { value: this.isGas ? 0 : 9.0 },
       uFdEps: { value: 0.02 },
       uSunDir: { value: new THREE.Vector3(1, 0, 0) },
       uSunColor: { value: this.sunColor.clone() },
@@ -1012,8 +1120,10 @@ export class Planet {
       uColDesert: cU(pal.desert), uColSavanna: cU(pal.savanna), uColForest: cU(pal.forest),
       uColTundra: cU(pal.tundra), uColRock: cU(pal.rock), uColSnow: cU(pal.snow),
       uOceanRough: { value: T.oceanRough }, uLandRough: { value: T.landRough },
+      uDebug: { value: 0 },
+      uLavaGlow: { value: T.lavaGlow ?? 0.0 },
       // cloud-field uniforms (shared names with the cloud material)
-      uCloudFreq: { value: 4.6 },
+      uCloudFreq: { value: 3.0 },
       uCloudCover: { value: this.opts.cloudCover ?? T.cloudCover },
       uCloudTime: { value: 0 },
     };
@@ -1022,6 +1132,7 @@ export class Planet {
     if (this.hasOcean) defs.HAS_OCEAN = '';
     if (this.hasCityLights) defs.HAS_CITY = '';
     if (this.isGas) defs.GASGIANT = '';
+    if ((T.lavaGlow ?? 0) > 0) defs.LAVA = '';
 
     this.surfaceMaterial = new THREE.ShaderMaterial({
       uniforms: this.surfaceUniforms,
@@ -1068,7 +1179,7 @@ export class Planet {
         blending: THREE.NormalBlending,
         fog: false,
       });
-      this.clouds = new THREE.Mesh(new THREE.IcosahedronGeometry(1, 24), this.cloudMaterial);
+      this.clouds = new THREE.Mesh(new THREE.IcosahedronGeometry(1, 40), this.cloudMaterial);
       this.clouds.frustumCulled = false;
       this.clouds.renderOrder = 1;
       this.clouds.layers.set(LAYER.FAR);
@@ -1078,7 +1189,12 @@ export class Planet {
     /* ---------------- atmosphere ---------------- */
     if (this.hasAtmosphere) {
       this.atmoUniforms = {
-        uScale: { value: R * this.atmR },
+        // The shell is deliberately drawn LARGER than the atmosphere it
+        // represents. The scattering is analytic, so the mesh is only a
+        // rasterisation proxy; if its silhouette sat exactly on uAtmR the
+        // polygon edges would clip the limb and scallop it. Rays through the
+        // gap simply miss the atmosphere sphere and discard.
+        uScale: { value: R * this.atmR * 1.06 },
         uCamPos: this.surfaceUniforms.uCamPos,
         uCenter: { value: new THREE.Vector3() },
         uSunDir: this.surfaceUniforms.uSunDir,
@@ -1106,7 +1222,7 @@ export class Planet {
         blending: THREE.AdditiveBlending,
         fog: false,
       });
-      this.atmosphere = new THREE.Mesh(new THREE.IcosahedronGeometry(1, 16), this.atmoMaterial);
+      this.atmosphere = new THREE.Mesh(new THREE.IcosahedronGeometry(1, 20), this.atmoMaterial);
       this.atmosphere.frustumCulled = false;
       this.atmosphere.renderOrder = 2;
       this.atmosphere.layers.set(LAYER.FAR);
@@ -1153,10 +1269,13 @@ export class Planet {
   /** level: 0 (coarsest) .. 5 (finest). Scaled by engine.settings.terrainLod. */
   setLod(level) {
     level = THREE.MathUtils.clamp(level | 0, 0, 5);
-    if (level === this._lod) return;
-    this._lod = level;
-    const lodTable = [6, 10, 14, 20, 28, 40];
     const q = this.engine.settings.terrainLod || 1;
+    // Also re-evaluate when the quality preset moved under us, otherwise a
+    // mid-session quality change silently keeps the old tessellation.
+    if (level === this._lod && q === this._lodQuality) return;
+    this._lod = level;
+    this._lodQuality = q;
+    const lodTable = [8, 12, 18, 26, 36, 48];
     const detail = Math.max(4, Math.min(64, Math.round(lodTable[level] * q)));
     if (detail === this._detail) return;
     this._detail = detail;
@@ -1193,9 +1312,20 @@ export class Planet {
 
       // Per-fragment detail is only worth its cost when a surface texel is
       // large on screen; below that it is pure noise and TAA fights it.
-      const detailAmt = THREE.MathUtils.clamp((3.0 - rel) * 0.5, 0.0, 1.0);
+      const detailAmt = THREE.MathUtils.clamp((5.5 - rel) * 0.30, 0.0, 1.0);
       u.uDetailAmt.value = this.isGas ? 0.0 : detailAmt * 0.55;
-      u.uDetailFreq.value = 190.0 + 260.0 * detailAmt;
+
+      // Detail frequency is chosen from the *screen* scale, not the distance.
+      // A frequency that keeps rising as the camera closes eventually puts
+      // the finest octave below one pixel, and the surface turns to
+      // salt-and-pepper that TAA cannot fix. Target the finest octave at
+      // roughly five pixels and work backwards through the lacunarity.
+      const alt = Math.max(dist - this.radius, this.radius * 1e-4);
+      const renderH = this.engine._size?.y || 720;
+      const pxAngle = THREE.MathUtils.degToRad(camera.fov || 60) / Math.max(renderH, 1);
+      const groundPerPx = alt * pxAngle;
+      const fFinest = (2 * Math.PI * this.radius) / Math.max(groundPerPx * 5.0, 1e-3);
+      u.uDetailFreq.value = THREE.MathUtils.clamp(fFinest / 5.06, 40.0, 4000.0);
 
       if (this.atmoUniforms) this.atmoUniforms.uCenter.value.copy(center);
     }
