@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AETHERIUM · UI harness</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E">
+<style>
+  html,body{margin:0;height:100%;background:#020406;overflow:hidden;}
+  #bg{position:fixed;inset:0;display:block;}
+  /* harness chrome — deliberately plain so it can never be mistaken for game UI */
+  #bar{position:fixed;left:0;right:0;bottom:0;z-index:200;display:flex;flex-wrap:wrap;gap:4px;
+    padding:7px 10px;background:rgba(0,0,0,.86);border-top:1px solid #223;
+    font:11px ui-monospace,"DejaVu Sans Mono",monospace;color:#8ab;}
+  #bar b{color:#5fe3ff;letter-spacing:.18em;margin-right:8px;align-self:center;font-weight:600;}
+  #bar span.sep{width:1px;background:#334;margin:0 6px;align-self:stretch;}
+  #bar button{font:inherit;color:#bcd;background:#0d141b;border:1px solid #24303a;padding:4px 8px;cursor:pointer;}
+  #bar button:hover{background:#16222c;color:#dff;border-color:#3b93ad;}
+  #hint{position:fixed;right:10px;bottom:46px;z-index:200;font:10px ui-monospace,monospace;color:#456;}
+  body.bare #bar,body.bare #hint{display:none;}
+</style>
+</head>
+<body>
+<canvas id="bg"></canvas>
+<div id="bar"></div>
+<div id="hint">press H to hide harness · ?bare=1 for clean screenshots</div>
+
+<script type="module">
+import { UI } from '../src/ui/ui.js';
+
+/* ───────── placeholder 3D backdrop: procedural starfield + nebula ───────── */
+const cv = document.getElementById('bg');
+function paintBG() {
+  const w = cv.width = innerWidth, h = cv.height = innerHeight;
+  const c = cv.getContext('2d');
+  c.fillStyle = '#020406'; c.fillRect(0, 0, w, h);
+  let s = 99991;
+  const rnd = () => (s = (s * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+  // nebula
+  for (let i = 0; i < 26; i++) {
+    const x = rnd() * w, y = rnd() * h, r = 120 + rnd() * 460;
+    const g = c.createRadialGradient(x, y, 0, x, y, r);
+    const hue = rnd() < .55 ? [30, 90, 130] : [90, 40, 120];
+    g.addColorStop(0, `rgba(${hue[0]},${hue[1]},${hue[2]},${(0.05 + rnd() * 0.07).toFixed(3)})`);
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    c.fillStyle = g; c.beginPath(); c.arc(x, y, r, 0, 7); c.fill();
+  }
+  // stars
+  for (let i = 0; i < 1600; i++) {
+    const x = rnd() * w, y = rnd() * h, m = rnd();
+    const r = m > .992 ? 1.8 : m > .95 ? 1.1 : .65;
+    c.fillStyle = `rgba(${200 + rnd() * 55 | 0},${215 + rnd() * 40 | 0},255,${(0.18 + rnd() * .75).toFixed(2)})`;
+    c.beginPath(); c.arc(x, y, r, 0, 7); c.fill();
+  }
+  // a planet limb bottom-right so transparent-centre screens have something behind them
+  const px = w * .74, py = h * 1.22, pr = h * .78;
+  const pg = c.createRadialGradient(px - pr * .35, py - pr * .5, pr * .05, px, py, pr);
+  pg.addColorStop(0, 'rgba(96,126,150,.55)');
+  pg.addColorStop(.45, 'rgba(38,54,70,.5)');
+  pg.addColorStop(1, 'rgba(4,8,12,.9)');
+  c.fillStyle = pg; c.beginPath(); c.arc(px, py, pr, 0, 7); c.fill();
+  c.strokeStyle = 'rgba(140,200,225,.20)'; c.lineWidth = 1.4;
+  c.beginPath(); c.arc(px, py, pr, 0, 7); c.stroke();
+}
+paintBG(); addEventListener('resize', paintBG);
+
+/* ───────── UI ───────── */
+const ui = new UI(document.body);
+window.ui = ui;
+if (new URLSearchParams(location.search).get('bare')) document.body.classList.add('bare');
+
+/* ───────── sample data ───────── */
+const CODEX = { entries: [
+  { id:'c1', category:'fauna', name:'Glass Harrier', rank:'apex', scale:'1:12',
+    meta:{ biome:'salt flats', mass:'340 kg', behaviour:'territorial', discovered:'cycle 118' },
+    summary:'A six-limbed aerial predator whose carapace is functionally transparent, refracting the sky until it is nearly invisible against cloud.',
+    body:['Harriers hunt by stillness. They hold position on a thermal for hours, then drop with the wings folded flat.',
+          'Salvagers report that a harrier will not approach a suit lamp set to steady white. Nobody has published why.'],
+    tags:['aerial','predator','refractive'] },
+  { id:'c2', category:'flora', name:'Vesper Bloom', rank:'common', scale:'1:2',
+    meta:{ biome:'tidal caves', cycle:'nocturnal', toxicity:'low' },
+    summary:'Bioluminescent lattice-flower that pulses in time with the local magnetic field.',
+    body:['Its light is not for pollinators — there are none. Current theory holds it is a discharge, not a signal.'],
+    tags:['bioluminescent','magnetic'] },
+  { id:'c3', category:'worlds', name:'Kestrel III', rank:'surveyed', scale:'1:10⁷',
+    meta:{ type:'terrestrial', gravity:'1.14 g', atmosphere:'N₂ / Ar', water:'11%' },
+    summary:'A cold terrestrial world with an unusually deep regolith and a single continuous salt sea.',
+    body:['The sea does not freeze. Nobody has found the heat source.'], tags:['terrestrial','cold','anomalous'] },
+  { id:'c4', category:'stars', name:'HD-2214 Ashfall', rank:'catalogued', scale:'1:10⁹',
+    meta:{ class:'K3V', age:'6.1 Gyr', bodies:'7' },
+    summary:'An orange dwarf shrouded in a dust torus that gives every sunrise a red horizon line.',
+    body:['The torus is not natural. Its inner edge is machined to within 40 metres over 900 000 km.'], tags:['dwarf','engineered'] },
+  { id:'c5', category:'tech', name:'Lattice Anchor', rank:'artefact', scale:'1:1',
+    meta:{ origin:'founder era', power:'unknown', status:'inert' },
+    summary:'A three-metre pillar of a material that reflects nothing and casts no shadow.',
+    body:['Anchors appear at exactly one location per system, always at the barycentre of the two largest bodies.'],
+    tags:['founder','artefact'] },
+  { id:'c6', category:'lore', name:'The Unwinding', rank:'record', scale:'—',
+    meta:{ source:'archivist fragment', integrity:'62%' },
+    summary:'The founder\'s final transmission, recovered in nine incomplete pieces.',
+    body:['"I am not leaving. I am becoming the room."','Fragments four, five and seven remain unrecovered.'],
+    tags:['founder','fragment'] },
+  { id:'c7', category:'keys', name:'The First Key', rank:'recovered', scale:'1:1',
+    meta:{ recovered:'cycle 204', location:'Kestrel III', bearer:'you' },
+    summary:'A key is not an object. It is a permission written into the lattice itself.',
+    body:['Holding it, the horizon renders one kilometre further than it should.'], tags:['key','founder'] },
+  { id:'c8', category:'keys', name:'The Second Key', discovered:false },
+  { id:'c9', category:'keys', name:'The Third Key', discovered:false },
+  { id:'c10', category:'anomaly', name:'Drift Object 04', discovered:false },
+  { id:'c11', category:'fauna', name:'Mantle Crawler', discovered:false },
+  { id:'c12', category:'flora', name:'Ash Fern', rank:'common', scale:'1:1',
+    meta:{ biome:'volcanic', cycle:'diurnal' }, summary:'Fern that fixes carbon directly from ash fall.', tags:['hardy'] },
+  { id:'c13', category:'worlds', name:'Orrery Prime', discovered:false },
+  { id:'c14', category:'tech', name:'Survey Drone MK-IV', rank:'standard', scale:'1:4',
+    meta:{ mass:'6 kg', endurance:'40 min' }, summary:'Standard-issue autonomous scanner.', tags:['tool'] },
+] };
+
+const STARMAP = { region:'orion spur · lattice quadrant iv', systems: [
+  { id:'s1', name:'Ashfall', current:true, visited:true, type:'orange dwarf', spectral:'K3V', distanceLy:0, planets:7, hazard:1, anomalies:1,
+    resources:{ metal:.62, silicate:.8, volatiles:.35, exotic:.12 }, note:'Home berth. Dust torus scatters long-range scans; expect degraded sensor range in-system.' },
+  { id:'s2', name:'Kestrel', visited:true, type:'yellow main sequence', spectral:'G2V', distanceLy:14.6, planets:5, hazard:2, anomalies:2,
+    resources:{ metal:.4, silicate:.55, volatiles:.9, exotic:.3 }, note:'Kestrel III holds a salt sea that will not freeze. One anchor confirmed at the barycentre.' },
+  { id:'s3', name:'The Quiet', visited:false, type:'binary · white dwarf pair', spectral:'DA+DA', distanceLy:38.2, planets:2, hazard:4, anomalies:3,
+    resources:{ metal:.9, silicate:.2, volatiles:.05, exotic:.71 }, note:'No transmissions of any kind originate from this system. Not even reflected starlight modulates correctly.' },
+  { id:'s4', name:'Heliotrope', visited:false, type:'red giant', spectral:'M2III', distanceLy:61.9, planets:9, hazard:3, anomalies:0,
+    resources:{ metal:.25, silicate:.45, volatiles:.6, exotic:.44 } },
+  { id:'s5', name:'Orrery', visited:true, type:'blue subgiant', spectral:'B8IV', distanceLy:88.4, planets:4, hazard:5, anomalies:1,
+    resources:{ metal:.75, silicate:.3, volatiles:.1, exotic:.95 }, note:'Radiation environment lethal without a reclaimer chassis.' },
+  { id:'s6', name:'Sable Drift', visited:false, type:'rogue · unlit', spectral:'—', distanceLy:120.1, planets:1, hazard:2, anomalies:4,
+    resources:{ metal:.5, silicate:.5, volatiles:.4, exotic:.6 } },
+  { id:'s7', name:'Meridian', visited:false, type:'yellow-white', spectral:'F5V', distanceLy:154.8, planets:6, hazard:1, anomalies:0,
+    resources:{ metal:.55, silicate:.7, volatiles:.5, exotic:.2 } },
+  { id:'s8', name:'Nocturne', visited:false, type:'neutron', spectral:'PSR', distanceLy:212.5, planets:0, hazard:5, anomalies:2,
+    resources:{ metal:.1, silicate:.05, volatiles:0, exotic:1 } },
+] };
+
+ui.setCodex(CODEX);
+ui.setStarmap(STARMAP);
+
+/* ───────── HUD demo state ───────── */
+const MARKERS = [
+  { az: 0.35, dist: 1240, type:'objective', label:'Anchor' },
+  { az: 1.9,  dist: 480,  type:'poi',       label:'Wreck' },
+  { az: 3.4,  dist: 12800,type:'resource',  label:'Vein' },
+  { az: 5.1,  dist: 90,   type:'hostile',   label:'Harrier' },
+  { az: 2.4,  dist: 4e6,  type:'key',       label:'Signal' },
+];
+let hdg = 0.6, hudRAF = 0;
+function hudLoop() {
+  hudRAF = requestAnimationFrame(hudLoop);
+  hdg += 0.0022;
+  ui.hud.setCompass(hdg, MARKERS);
+}
+function seedHUD() {
+  ui.hud.setVitals({ o2: 78, integrity: 96, energy: 41 });
+  ui.hud.setObjective('Locate the second anchor', 'Kestrel III · northern salt flats · 1.2 km');
+  ui.hud.setSpeed(214);
+  ui.hud.setCoords('KES-III · 41.208N 6.774W · ALT 213 m');
+  ui.hud.setSector('14-07');
+  ui.hud.setPrompt('[E] Deep scan');
+  ui.hud.setReticle('target');
+  ui.hud.setDiscoveryLog([
+    { title:'new species', body:'Glass Harrier — apex aerial predator' },
+    { title:'mineral vein', body:'Exotic silicate, 4.2 t estimated' },
+    { title:'signal detected', kind:'warn', body:'Founder-band carrier, bearing 137°' },
+  ]);
+  if (!hudRAF) hudLoop();
+}
+
+/* ───────── harness controls ───────── */
+const bar = document.getElementById('bar');
+function group(name) { const b = document.createElement('b'); b.textContent = name; bar.appendChild(b); }
+function sep() { const s = document.createElement('span'); s.className = 'sep'; bar.appendChild(s); }
+function btn(label, fn) {
+  const b = document.createElement('button'); b.textContent = label;
+  b.onclick = fn; bar.appendChild(b); return b;
+}
+
+group('SCREENS');
+['boot','title','creator','loading','hud','codex','starmap','pause','settings','credits'].forEach((n) => {
+  btn(n, () => {
+    if (n === 'hud') { ui.showHUD(true); seedHUD(); return; }
+    if (n === 'loading') { ui.showScreen('loading'); ui.loading.simulate(9000); return; }
+    ui.showScreen(n);
+  });
+});
+sep(); group('HUD');
+btn('seed', seedHUD);
+btn('vitals-low', () => ui.hud.setVitals({ o2: 12, integrity: 34, energy: 8 }));
+btn('vitals-full', () => ui.hud.setVitals({ o2: 100, integrity: 100, energy: 100 }));
+btn('toast', () => ui.hud.showToast({ title:'discovery logged', body:'Glass Harrier added to codex · +240 data', kind:'good' }));
+btn('toast-warn', () => ui.hud.showToast({ title:'hull breach', body:'Integrity falling — seal the compartment', kind:'warn' }));
+btn('subtitle', () => ui.hud.showSubtitle('ARCHIVIST: You are standing on top of it. The anchor is beneath the salt.', 6000));
+let scanT = 0, scanRAF = 0;
+btn('scan', () => {
+  cancelAnimationFrame(scanRAF); scanT = 0;
+  const step = () => { scanT += .006; ui.hud.setScanProgress(Math.min(1, scanT)); if (scanT < 1.25) scanRAF = requestAnimationFrame(step); };
+  step();
+});
+btn('scan-off', () => { cancelAnimationFrame(scanRAF); ui.hud.setScanProgress(null); });
+btn('reticle+', () => ui.hud.setReticle('lock'));
+btn('discovery', () => ui.hud.pushDiscovery({ title:'artefact', body:'Lattice Anchor — inert, founder era' }));
+sep(); group('FX');
+btn('bars', () => { window._bars = !window._bars; ui.showCinematicBars(window._bars); });
+btn('fade', async () => { await ui.fadeTo('#000', 500); await new Promise(r => setTimeout(r, 350)); await ui.fadeTo(null, 700); });
+btn('reduce-motion', () => { window._rm = !window._rm; ui.setReducedMotion(window._rm); });
+
+/* event log to console (proves the contract fires) */
+['ui:start','ui:creator-change','ui:creator-done','ui:travel','ui:resume','ui:setting','ui:quit']
+  .forEach((t) => ui.addEventListener(t, (e) => { window.__uiEvents = (window.__uiEvents||[]).concat([{t, d:e.detail}]); }));
+window.addEventListener('ui:sfx', (e) => { window.__sfx = (window.__sfx||[]).concat([e.detail.name]); });
+
+addEventListener('keydown', (e) => { if (e.key === 'h' || e.key === 'H') document.body.classList.toggle('bare'); });
+
+/* boot straight into the title so the harness looks alive on load */
+ui.showScreen('title');
+window.__ready = true;
+</script>
+</body>
+</html>

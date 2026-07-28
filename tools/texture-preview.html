@@ -1,0 +1,218 @@
+<meta charset="utf-8">
+<title>AETHERIUM · procedural material preview</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body { margin: 0; background: #0b0d10; color: #d7dee6;
+    font: 12px/1.45 ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  header { padding: 14px 18px 10px; border-bottom: 1px solid #1b2029; }
+  h1 { margin: 0 0 6px; font-size: 15px; letter-spacing: .12em; text-transform: uppercase;
+       font-weight: 600; color: #eaf1f8; }
+  #meta { color: #7d8896; }
+  #log { white-space: pre; color: #9fb2c6; padding: 10px 18px 14px; margin: 0;
+         border-bottom: 1px solid #1b2029; font-size: 11px; max-height: 40vh; overflow: auto; }
+  #wrap { padding: 12px 18px 40px; }
+  canvas { display: block; image-rendering: auto; }
+  .err { color: #ff6a6a; }
+</style>
+<header>
+  <h1>Aetherium — procedural PBR material set</h1>
+  <div id="meta">generating…</div>
+</header>
+<pre id="log"></pre>
+<div id="wrap"><canvas id="c"></canvas></div>
+
+<script type="module">
+import * as TEX from '../src/render/textures.js';
+
+const qs = new URLSearchParams(location.search);
+const SIZE = Math.max(64, +(qs.get('size') || 512));
+const CELL = Math.max(96, +(qs.get('cell') || 200));
+const ONLY = qs.get('only');
+const KINDS = ONLY ? ONLY.split(',') : TEX.KINDS;
+const COLS = ['albedo', 'normal', 'roughness', 'ao', 'lit (GGX)', 'tile 2×2'];
+
+const logEl = document.getElementById('log');
+const metaEl = document.getElementById('meta');
+const errors = [];
+function log(s) { logEl.textContent += s + '\n'; }
+window.addEventListener('error', (e) => { errors.push(String(e.message)); });
+
+/* ------------------------------------------------------------------ *
+ * CPU beauty pass — a small GGX + hemisphere-IBL shader so the maps can
+ * be judged as a *material*, not just as four grey pictures.
+ * ------------------------------------------------------------------ */
+const S2L = new Float32Array(256);
+for (let i = 0; i < 256; i++) {
+  const c = i / 255;
+  S2L[i] = c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+}
+function l2s(x) {
+  x = x <= 0 ? 0 : x >= 1 ? 1 : x;
+  return (x <= 0.0031308 ? x * 12.92 : 1.055 * Math.pow(x, 1 / 2.4) - 0.055) * 255;
+}
+function litPreview(set, N) {
+  const alb = set.map.image.data, nrm = set.normalMap.image.data;
+  const rgh = set.roughnessMap.image.data, aom = set.aoMap.image.data;
+  const mtl = set.metalnessMap ? set.metalnessMap.image.data : null;
+  const out = new Uint8ClampedArray(N * N * 4);
+  // key light slightly off to the upper-left, viewer down +Z
+  const lx = -0.42, ly = 0.46, lz = 0.78;
+  const ll = 1 / Math.hypot(lx, ly, lz);
+  const Lx = lx * ll, Ly = ly * ll, Lz = lz * ll;
+  const Hx = Lx, Hy = Ly, Hz = Lz + 1;
+  const hl = 1 / Math.hypot(Hx, Hy, Hz);
+  const hx = Hx * hl, hy = Hy * hl, hz = Hz * hl;
+  const sun = [3.1, 2.95, 2.75];
+  const skyU = [0.30, 0.38, 0.52], skyD = [0.10, 0.09, 0.085];
+  for (let i = 0, j = 0; i < N * N; i++, j += 4) {
+    const nx = nrm[j] / 127.5 - 1, ny = nrm[j + 1] / 127.5 - 1, nz = nrm[j + 2] / 127.5 - 1;
+    const inv = 1 / Math.sqrt(nx * nx + ny * ny + nz * nz);
+    const Nx = nx * inv, Ny = ny * inv, Nz = nz * inv;
+    let ar = S2L[alb[j]], ag = S2L[alb[j + 1]], ab = S2L[alb[j + 2]];
+    const ro = Math.max(0.045, rgh[j + 1] / 255);
+    const ao = aom[j] / 255;
+    const me = mtl ? mtl[j] / 255 : 0;
+
+    const ndl = Math.max(0, Nx * Lx + Ny * Ly + Nz * Lz);
+    const ndv = Math.max(1e-3, Nz);
+    const ndh = Math.max(0, Nx * hx + Ny * hy + Nz * hz);
+    const vdh = Math.max(0, hz);
+
+    const a = ro * ro, a2 = a * a;
+    const dd = ndh * ndh * (a2 - 1) + 1;
+    const D = a2 / (Math.PI * dd * dd);
+    const k = a * 0.5;
+    const G = (ndl / (ndl * (1 - k) + k)) * (ndv / (ndv * (1 - k) + k));
+    const f0r = 0.04 + (ar - 0.04) * me, f0g = 0.04 + (ag - 0.04) * me, f0b = 0.04 + (ab - 0.04) * me;
+    const fc = Math.pow(1 - vdh, 5);
+    const Fr = f0r + (1 - f0r) * fc, Fg = f0g + (1 - f0g) * fc, Fb = f0b + (1 - f0b) * fc;
+    const specK = (D * G) / (4 * ndl * ndv + 1e-4) * ndl;
+
+    const kd = (1 - me);
+    // hemisphere ambient, weighted by the normal's up component
+    const up = Ny * 0.5 + 0.5;
+    const amr = (skyD[0] + (skyU[0] - skyD[0]) * up) * ao;
+    const amg = (skyD[1] + (skyU[1] - skyD[1]) * up) * ao;
+    const amb = (skyD[2] + (skyU[2] - skyD[2]) * up) * ao;
+    // crude specular occlusion + horizon-ish env spec
+    const envS = ao * (0.35 + 0.65 * (1 - ro)) * 0.55;
+
+    let r = ar * kd * ndl * sun[0] / Math.PI * 2.4 + Fr * specK * sun[0] + ar * kd * amr + f0r * envS * amr * 3;
+    let g = ag * kd * ndl * sun[1] / Math.PI * 2.4 + Fg * specK * sun[1] + ag * kd * amg + f0g * envS * amg * 3;
+    let b = ab * kd * ndl * sun[2] / Math.PI * 2.4 + Fb * specK * sun[2] + ab * kd * amb + f0b * envS * amb * 3;
+
+    // ACES-ish filmic
+    r = (r * (2.51 * r + 0.03)) / (r * (2.43 * r + 0.59) + 0.14);
+    g = (g * (2.51 * g + 0.03)) / (g * (2.43 * g + 0.59) + 0.14);
+    b = (b * (2.51 * b + 0.03)) / (b * (2.43 * b + 0.59) + 0.14);
+    out[j] = l2s(r); out[j + 1] = l2s(g); out[j + 2] = l2s(b); out[j + 3] = 255;
+  }
+  return out;
+}
+
+/* ------------------------------------------------------------------ */
+function toCanvas(data, N) {
+  const cv = document.createElement('canvas');
+  cv.width = N; cv.height = N;
+  const ctx = cv.getContext('2d');
+  const id = new ImageData(new Uint8ClampedArray(data.buffer ? data.buffer.slice(0) : data), N, N);
+  ctx.putImageData(id, 0, 0);
+  return cv;
+}
+
+const canvas = document.getElementById('c');
+const g = canvas.getContext('2d');
+const LBL = 118, PAD = 6, HDR = 26;
+canvas.width = LBL + COLS.length * (CELL + PAD) + PAD;
+canvas.height = HDR + KINDS.length * (CELL + PAD) + PAD;
+
+g.fillStyle = '#0b0d10';
+g.fillRect(0, 0, canvas.width, canvas.height);
+g.font = '600 11px ui-monospace, monospace';
+g.textBaseline = 'middle';
+g.fillStyle = '#8ea3b8';
+COLS.forEach((c, i) => {
+  g.fillText(c.toUpperCase(), LBL + i * (CELL + PAD), HDR / 2 + 2);
+});
+
+async function frame() { return new Promise((r) => requestAnimationFrame(() => r())); }
+
+(async function run() {
+  const t0 = performance.now();
+  const timings = [];
+  for (let row = 0; row < KINDS.length; row++) {
+    const kind = KINDS[row];
+    let set;
+    const tk = performance.now();
+    try {
+      set = TEX.makeMaterialSet(kind, { size: SIZE, seed: 12345 });
+    } catch (e) {
+      errors.push(kind + ': ' + e.message);
+      continue;
+    }
+    const dt = performance.now() - tk;
+    timings.push([kind, dt]);
+
+    const y = HDR + row * (CELL + PAD);
+    g.fillStyle = '#c8d6e4';
+    g.font = '600 12px ui-monospace, monospace';
+    g.fillText(kind, 6, y + CELL / 2 - 7);
+    g.fillStyle = '#5c6a79';
+    g.font = '10px ui-monospace, monospace';
+    g.fillText(dt.toFixed(1) + ' ms @' + SIZE, 6, y + CELL / 2 + 9);
+
+    const imgs = [
+      set.map.image.data, set.normalMap.image.data,
+      set.roughnessMap.image.data, set.aoMap.image.data,
+      litPreview(set, SIZE), set.map.image.data,
+    ];
+    for (let c = 0; c < COLS.length; c++) {
+      const x = LBL + c * (CELL + PAD);
+      const cv = toCanvas(imgs[c], SIZE);
+      g.save();
+      // DataTexture rows run bottom-to-top (flipY = false), so flip for display
+      g.translate(x, y + CELL);
+      g.scale(1, -1);
+      if (c === COLS.length - 1) {
+        const h = CELL / 2;
+        for (let ty = 0; ty < 2; ty++) for (let tx = 0; tx < 2; tx++) {
+          g.drawImage(cv, tx * h, ty * h, h, h);
+        }
+      } else {
+        g.drawImage(cv, 0, 0, CELL, CELL);
+      }
+      g.restore();
+      g.strokeStyle = '#232a34';
+      g.strokeRect(x + 0.5, y + 0.5, CELL - 1, CELL - 1);
+    }
+    set.dispose();
+    await frame();
+  }
+  const genMs = performance.now() - t0;
+
+  // --- self test
+  let st = null;
+  try { st = TEX.__selftest({ size: 256, bigSize: 1024, bigKinds: ['rock', 'metalPanel', 'skin'] }); }
+  catch (e) { errors.push('selftest: ' + e.message); }
+
+  let txt = `preview: ${KINDS.length} materials @ ${SIZE}² in ${genMs.toFixed(0)} ms\n`;
+  txt += timings.map(([k, d]) => `  ${k.padEnd(13)} ${d.toFixed(1).padStart(7)} ms`).join('\n') + '\n\n';
+  if (st) {
+    txt += `__selftest @${st.size}²  total ${st.totalMs} ms  avg ${st.avgMs} ms  `
+      + `maxSeamError ${st.maxSeamError}  deterministic ${st.allDeterministic}\n`;
+    txt += st.results.map((r) =>
+      `  ${r.kind.padEnd(13)} ${String(r.ms).padStart(7)} ms   seam(alb/nrm/rgh/ao) `
+      + `${r.seam.map.toFixed(5)} ${r.seam.normalMap.toFixed(5)} `
+      + `${r.seam.roughnessMap.toFixed(5)} ${r.seam.aoMap.toFixed(5)}`).join('\n');
+    txt += '\n\n  1024² full sets: ' + st.big.map((b) => `${b.kind} ${b.ms} ms`).join(' · ') + '\n';
+  }
+  if (errors.length) txt += '\nERRORS:\n' + errors.map((e) => '  ' + e).join('\n');
+  logEl.textContent = txt;
+  metaEl.textContent = `${KINDS.length} materials · ${SIZE}² maps · seamless tiling · deterministic (seed 12345)`
+    + (errors.length ? ` · ${errors.length} ERROR(S)` : '');
+  if (errors.length) metaEl.className = 'err';
+  window.__selftestResult = st;
+  window.__errors = errors;
+  window.__done = true;
+})();
+</script>

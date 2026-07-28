@@ -1,0 +1,31 @@
+<!doctype html><html><head><meta charset="utf-8"><title>sky test</title>
+<style>html,body{margin:0;height:100%;background:#000;overflow:hidden}canvas{display:block;width:100vw;height:100vh}
+#log{position:fixed;left:8px;top:8px;color:#7fe;font:12px ui-monospace,monospace;white-space:pre;z-index:10}</style>
+</head><body><canvas id="c"></canvas><div id="log"></div>
+<script type="module">
+import * as THREE from '../vendor/three.module.js';
+import { Engine, LAYER } from '../src/core/engine.js';
+import { Sky } from '../src/render/sky.js';
+const errs=[]; window.addEventListener('error',e=>errs.push(e.message));
+const engine = new Engine(document.getElementById('c'), { quality:'high' });
+const sky = new Sky(engine, { seed: 3.17, nebulaStrength: 0.32, starBrightness: 1.0 });
+engine.post.params.autoExposure = false;
+engine.post.params.exposure = 1.0;
+engine.post.params.bloomStrength = 0.10;
+engine.post.params.grainAmount = 0.015;
+engine.camera.position.set(0,0,0);
+let yaw = 0.6, pitch = 0.1, frames=0;
+window.__setView = (y,p2)=>{ yaw=y; pitch=p2; };
+window.__sky = sky; window.__engine = engine;
+window.__step = (n=1)=>{
+  for(let i=0;i<n;i++){
+    engine.camera.quaternion.setFromEuler(new THREE.Euler(pitch, yaw, 0, 'YXZ'));
+    sky.update(1/60, engine.camera, engine._size);
+    engine.render(1/60); frames++;
+  }
+  document.getElementById('log').textContent = `frames ${frames} errs ${errs.length}`;
+  return {frames, errors: errs.slice(0,5)};
+};
+engine.setAdaptive(false);
+window.__ready = true;
+</script></body></html>

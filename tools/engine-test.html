@@ -1,0 +1,108 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>engine test</title>
+<style>html,body{margin:0;height:100%;background:#000;overflow:hidden}canvas{display:block;width:100vw;height:100vh}
+#log{position:fixed;left:8px;top:8px;color:#7fe;font:12px ui-monospace,monospace;white-space:pre;z-index:10}</style>
+</head><body>
+<canvas id="c"></canvas><div id="log"></div>
+<script type="module">
+import * as THREE from '../vendor/three.module.js';
+import { Engine, LAYER } from '../src/core/engine.js';
+
+const errs = [];
+window.addEventListener('error', e => errs.push(String(e.message)));
+window.onunhandledrejection = e => errs.push('rej:' + e.reason);
+
+const canvas = document.getElementById('c');
+const engine = new Engine(canvas, { quality: 'high', preserveDrawingBuffer: true });
+const scene = engine.scene;
+
+// A simple but lighting-representative scene: PBR spheres over a plane, one
+// strong key light, so we can see tonemapping / AO / bloom / shadows working.
+const sun = new THREE.DirectionalLight(0xfff2e0, 4.0);
+sun.position.set(30, 40, 20);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.camera.left = -40; sun.shadow.camera.right = 40;
+sun.shadow.camera.top = 40; sun.shadow.camera.bottom = -40;
+sun.shadow.camera.far = 200;
+sun.shadow.bias = -0.0008;
+sun.layers.enableAll();
+scene.add(sun);
+scene.add(new THREE.HemisphereLight(0x334466, 0x1a1410, 0.6));
+
+const ground = new THREE.Mesh(
+  new THREE.PlaneGeometry(200, 200),
+  new THREE.MeshStandardMaterial({ color: 0x6a6258, roughness: 0.95, metalness: 0.0 })
+);
+ground.rotation.x = -Math.PI / 2;
+ground.receiveShadow = true;
+ground.layers.set(LAYER.MID);
+scene.add(ground);
+engine.post.patchMaterial(ground.material);
+
+for (let i = 0; i < 7; i++) {
+  const m = new THREE.Mesh(
+    new THREE.SphereGeometry(2, 48, 32),
+    new THREE.MeshStandardMaterial({
+      color: new THREE.Color().setHSL(i / 7, 0.5, 0.5),
+      roughness: 0.08 + i * 0.15, metalness: i % 2 ? 1.0 : 0.1,
+    })
+  );
+  m.position.set((i - 3) * 5.5, 2, 0);
+  m.castShadow = true; m.receiveShadow = true;
+  m.layers.set(LAYER.MID);
+  scene.add(m);
+  engine.post.patchMaterial(m.material);
+}
+
+// An emissive object to exercise bloom + auto-exposure.
+const glow = new THREE.Mesh(
+  new THREE.IcosahedronGeometry(1.2, 3),
+  new THREE.MeshBasicMaterial({ color: new THREE.Color(6, 3.2, 1.1) })
+);
+glow.position.set(0, 7, -6);
+glow.layers.set(LAYER.MID);
+scene.add(glow);
+
+engine.camera.position.set(0, 6, 22);
+engine.camera.lookAt(0, 2, 0);
+engine.post.params.lightShaftStrength = 0.6;
+engine.post.params.fogDensity = 0.0018;
+engine.post.params.sunDir = sun.position.clone().normalize();
+engine.post.params.dofStrength = 0.5;
+engine.post.params.dofFocus = 22;
+
+let frames = 0;
+function frame(dt) {
+  glow.rotation.y += dt; glow.rotation.x += dt * 0.4;
+  engine.render(dt);
+  frames++;
+}
+
+// Driver-stepped rendering.
+//
+// Under software rasterisation a frame takes seconds, and a busy rAF loop
+// starves Playwright's own polling so waitForFunction never resolves. Exposing
+// an explicit step lets the harness render exactly what it needs and stay
+// responsive between calls.
+window.__step = (n = 1, dt = 1 / 60) => {
+  const t0 = performance.now();
+  for (let i = 0; i < n; i++) frame(dt);
+  const elapsed = performance.now() - t0;
+  document.getElementById('log').textContent =
+    `frames ${frames}  draws ${engine.stats.drawCalls}  tris ${engine.stats.triangles}\n` +
+    `cpu ${engine.stats.cpuMs.toFixed(1)}ms  scale ${engine.stats.renderScale.toFixed(2)}\n` +
+    `errors ${errs.length}`;
+  return {
+    frames, errors: errs.slice(0, 8),
+    draws: engine.stats.drawCalls, tris: engine.stats.triangles,
+    cpuMs: +engine.stats.cpuMs.toFixed(2),
+    msPerFrame: +(elapsed / n).toFixed(1),
+    programs: engine.renderer.info.programs.length,
+  };
+};
+window.__engine = engine;
+engine.setAdaptive(false);   // keep resolution fixed so shots are comparable
+engine.setQuality('high');
+window.__ready = true;
+</script></body></html>

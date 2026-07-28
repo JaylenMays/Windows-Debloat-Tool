@@ -1,0 +1,520 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AETHERIUM — audio bench</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%2305070b'/%3E%3Cpath d='M1 8h2l1.5-5L7 13l2-8 1.5 3H15' stroke='%2338e1ff' fill='none'/%3E%3C/svg%3E">
+<style>
+  :root{
+    --bg:#05070b; --panel:#0b1018; --line:#16202e; --fg:#c9d6e4;
+    --dim:#5d7086; --acc:#38e1ff; --acc2:#ffb454; --ok:#4ce08a; --bad:#ff5f6d;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--fg);
+    font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,"DejaVu Sans Mono",monospace}
+  header{display:flex;align-items:baseline;gap:14px;padding:12px 18px;border-bottom:1px solid var(--line);
+    background:linear-gradient(180deg,#0a1220,#05070b)}
+  header h1{margin:0;font-size:14px;letter-spacing:.28em;text-transform:uppercase;color:var(--acc);font-weight:500}
+  header .sub{color:var(--dim);letter-spacing:.12em}
+  #state{margin-left:auto;color:var(--dim)}
+  #state b{color:var(--ok)}
+  .wrap{display:grid;grid-template-columns:minmax(320px,1fr) minmax(420px,1.15fr);gap:14px;padding:14px 18px 40px}
+  @media (max-width:980px){.wrap{grid-template-columns:1fr}}
+  .panel{background:var(--panel);border:1px solid var(--line);padding:12px 13px 14px}
+  .panel h2{margin:0 0 10px;font-size:10px;letter-spacing:.24em;text-transform:uppercase;color:var(--acc);font-weight:500}
+  .panel h3{margin:12px 0 6px;font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--dim);font-weight:500}
+  button{background:#101a26;color:var(--fg);border:1px solid #1e2c3d;padding:6px 9px;cursor:pointer;
+    font:inherit;letter-spacing:.04em;transition:background .12s,border-color .12s,color .12s}
+  button:hover{background:#16263a;border-color:var(--acc);color:#fff}
+  button:active{background:#1d3b52}
+  button.prim{border-color:var(--acc);color:var(--acc)}
+  button.warn{border-color:var(--acc2);color:var(--acc2)}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:6px}
+  .row{display:flex;align-items:center;gap:8px;margin:5px 0}
+  .row label{width:96px;color:var(--dim);flex:none}
+  .row output{width:44px;text-align:right;color:var(--acc)}
+  input[type=range]{flex:1;accent-color:#38e1ff;background:transparent;height:18px}
+  select{background:#101a26;color:var(--fg);border:1px solid #1e2c3d;padding:5px 7px;font:inherit;flex:1}
+  canvas{display:block;width:100%;background:#04070c;border:1px solid var(--line)}
+  table{border-collapse:collapse;width:100%;font-size:11px;margin-top:6px}
+  th,td{text-align:right;padding:2px 6px;border-bottom:1px solid #101823;white-space:nowrap}
+  th{color:var(--dim);font-weight:500;text-transform:uppercase;letter-spacing:.1em;font-size:9px}
+  td.n{text-align:left;color:var(--fg)}
+  tr.pass td.st{color:var(--ok)}
+  tr.fail td.st{color:var(--bad)}
+  tr.fail{background:rgba(255,95,109,.07)}
+  #summary{margin-top:8px;padding:7px 9px;border:1px solid var(--line);background:#080d14;line-height:1.7}
+  #summary .ok{color:var(--ok)} #summary .bad{color:var(--bad)} #summary .k{color:var(--dim)}
+  #log{height:120px;overflow:auto;background:#04070c;border:1px solid var(--line);padding:6px 8px;color:var(--dim);margin-top:8px}
+  #log .e{color:var(--bad)}
+  .tag{display:inline-block;padding:1px 6px;border:1px solid var(--line);color:var(--dim);margin-right:4px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Aetherium</h1><span class="sub">procedural audio bench</span>
+  <span id="state">ctx <b id="ctxstate">—</b> · voices <b id="vcount">0</b> · nodes <b id="ncount">0</b> · space <b id="spname">—</b></span>
+</header>
+
+<div class="wrap">
+  <!-- ---------------- controls ---------------- -->
+  <section class="panel">
+    <h2>Transport</h2>
+    <div class="row">
+      <button id="btnInit" class="prim">init audio</button>
+      <button id="btnStopAll">stop all</button>
+      <button id="btnDuck">duckFor(2)</button>
+    </div>
+
+    <h3>Buses</h3>
+    <div class="row"><label>master</label><input type="range" id="sMaster" min="0" max="1" step="0.01" value="0.85"><output id="oMaster">0.85</output></div>
+    <div class="row"><label>music</label><input type="range" id="sMusic" min="0" max="1" step="0.01" value="0.62"><output id="oMusic">0.62</output></div>
+    <div class="row"><label>sfx</label><input type="range" id="sSfx" min="0" max="1" step="0.01" value="0.90"><output id="oSfx">0.90</output></div>
+    <div class="row"><label>ambient</label><input type="range" id="sAmbient" min="0" max="1" step="0.01" value="0.65"><output id="oAmbient">0.65</output></div>
+    <div class="row"><label>ui</label><input type="range" id="sUi" min="0" max="1" step="0.01" value="0.70"><output id="oUi">0.70</output></div>
+
+    <h3>Ship engine</h3>
+    <div class="row"><label>throttle</label><input type="range" id="sThrottle" min="0" max="1" step="0.01" value="0"><output id="oThrottle">0.00</output></div>
+    <div class="row"><label>warp</label><input type="range" id="sWarp" min="0" max="1" step="0.01" value="0"><output id="oWarp">0.00</output></div>
+    <div class="row"><button id="btnEngineOff">engine off</button></div>
+
+    <h3>Ambience</h3>
+    <div class="row"><select id="selAmb"></select><button id="btnAmb">start</button><button id="btnAmbStop">stop</button></div>
+
+    <h3>Music</h3>
+    <div class="row"><select id="selMood"></select><button id="btnMusic">start</button><button id="btnMusicStop">stop</button></div>
+
+    <h3>Reverb space</h3>
+    <div class="row"><select id="selSpace"></select><button id="btnSpace">crossfade</button></div>
+
+    <h3>Footstep surface</h3>
+    <div class="row"><select id="selSurf"></select><button id="btnWalk">walk 8 steps</button></div>
+
+    <h2 style="margin-top:16px">One-shots</h2>
+    <div class="grid" id="shots"></div>
+  </section>
+
+  <!-- ---------------- scope + tests ---------------- -->
+  <section class="panel">
+    <h2>Oscilloscope</h2>
+    <canvas id="scope" width="900" height="150"></canvas>
+    <h2 style="margin-top:12px">Spectrum</h2>
+    <canvas id="spec" width="900" height="170"></canvas>
+
+    <h2 style="margin-top:14px">Offline DSP verification</h2>
+    <div class="row">
+      <button id="btnTest" class="prim">run offline render tests</button>
+      <button id="btnLeak" class="warn">leak test (200 one-shots)</button>
+    </div>
+    <div id="summary">
+      <span class="k">status</span> <span id="sumStatus">idle</span>
+    </div>
+    <div style="overflow-x:auto;margin-top:8px">
+      <table id="tbl">
+        <thead><tr>
+          <th class="n" style="text-align:left">signal</th><th>peak</th><th>rms</th><th>dur s</th>
+          <th>tail rms</th><th>NaN</th><th class="st">status</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div id="log"></div>
+  </section>
+</div>
+
+<script type="module">
+import { AudioEngine, CATALOGUE, AMBIENCE_PROFILES, MUSIC_MOODS, REVERB_SPACE_NAMES } from '../src/core/audio.js';
+
+const $ = (id) => document.getElementById(id);
+const errors = [];
+window.__audioErrors = errors;
+
+function log(msg, isErr) {
+  const el = document.createElement('div');
+  if (isErr) el.className = 'e';
+  el.textContent = msg;
+  $('log').appendChild(el);
+  $('log').scrollTop = 1e9;
+}
+window.addEventListener('error', (e) => { errors.push(String(e.message)); log('ERROR ' + e.message, true); });
+window.addEventListener('unhandledrejection', (e) => { errors.push(String(e.reason)); log('REJECT ' + e.reason, true); });
+
+/* ------------------------------------------------ live engine ---- */
+const engine = new AudioEngine();
+window.__engine = engine;
+
+let inited = false;
+async function ensureInit() {
+  if (inited) return;
+  const ok = await engine.init();
+  inited = !!ok;
+  $('ctxstate').textContent = engine.ctx ? engine.ctx.state : 'unavailable';
+  if (!ok) log('AudioContext unavailable — UI still functional', true);
+  else { log('audio initialised @ ' + engine.ctx.sampleRate + 'Hz'); draw(); }
+}
+$('btnInit').addEventListener('click', ensureInit);
+document.addEventListener('pointerdown', ensureInit, { once: true });
+
+/* populate selects */
+const fill = (sel, arr) => { for (const a of arr) { const o = document.createElement('option'); o.value = a; o.textContent = a; sel.appendChild(o); } };
+fill($('selAmb'), AMBIENCE_PROFILES);
+fill($('selMood'), MUSIC_MOODS);
+fill($('selSpace'), REVERB_SPACE_NAMES);
+fill($('selSurf'), ['rock', 'sand', 'ice', 'metal', 'grass']);
+$('selSpace').value = 'hall';
+
+/* one-shot buttons */
+for (const name of CATALOGUE) {
+  const b = document.createElement('button');
+  b.textContent = name;
+  b.dataset.shot = name;
+  b.addEventListener('click', async () => {
+    await ensureInit();
+    const opts = {};
+    if (name === 'footstep') { opts.surface = $('selSurf').value; opts.speed = 1; }
+    engine.play(name, opts);
+  });
+  $('shots').appendChild(b);
+}
+
+/* sliders */
+const bind = (sid, oid, fn, fmt = (v) => v.toFixed(2)) => {
+  const s = $(sid), o = $(oid);
+  s.addEventListener('input', async () => { o.textContent = fmt(+s.value); await ensureInit(); fn(+s.value); });
+};
+bind('sMaster', 'oMaster', (v) => engine.setMasterVolume(v));
+bind('sMusic', 'oMusic', (v) => engine.setBus('music', v));
+bind('sSfx', 'oSfx', (v) => engine.setBus('sfx', v));
+bind('sAmbient', 'oAmbient', (v) => engine.setBus('ambient', v));
+bind('sUi', 'oUi', (v) => engine.setBus('ui', v));
+const applyEngine = () => engine.setEngine(+$('sThrottle').value, +$('sWarp').value);
+bind('sThrottle', 'oThrottle', applyEngine);
+bind('sWarp', 'oWarp', applyEngine);
+
+$('btnEngineOff').addEventListener('click', () => { engine.stopEngine(0.5); $('sThrottle').value = 0; $('sWarp').value = 0; $('oThrottle').textContent = '0.00'; $('oWarp').textContent = '0.00'; });
+$('btnAmb').addEventListener('click', async () => { await ensureInit(); engine.startAmbience($('selAmb').value); });
+$('btnAmbStop').addEventListener('click', () => engine.stopAmbience(0.8));
+$('btnMusic').addEventListener('click', async () => { await ensureInit(); engine.startMusic($('selMood').value); });
+$('btnMusicStop').addEventListener('click', () => engine.stopMusic(1.5));
+$('btnSpace').addEventListener('click', async () => { await ensureInit(); engine.setSpace($('selSpace').value, 1.5); });
+$('btnDuck').addEventListener('click', async () => { await ensureInit(); engine.duckFor(2, 0.6); });
+$('btnStopAll').addEventListener('click', () => { engine.stopMusic(0.4); engine.stopAmbience(0.4); engine.stopEngine(0.3); });
+$('btnWalk').addEventListener('click', async () => {
+  await ensureInit();
+  const surf = $('selSurf').value;
+  for (let i = 0; i < 8; i++) setTimeout(() => engine.play('footstep', { surface: surf, speed: 0.9 }), i * 340);
+});
+
+/* ------------------------------------------------ visualiser ---- */
+const scope = $('scope'), sctx = scope.getContext('2d');
+const spec = $('spec'), pctx = spec.getContext('2d');
+let td = null, fd = null;
+let lastT = performance.now();
+
+function draw() {
+  requestAnimationFrame(draw);
+  const now = performance.now();
+  const dt = Math.min(0.05, (now - lastT) / 1000); lastT = now;
+  try { engine.update(dt, { pos: [0, 0, 0], quat: [0, 0, 0, 1] }); } catch (e) { /* reported by handler */ }
+
+  const an = engine.getAnalyser();
+  $('vcount').textContent = engine.stats().voices;
+  $('ncount').textContent = engine.stats().nodes;
+  $('spname').textContent = engine.getSpace() || '—';
+  if (engine.ctx) $('ctxstate').textContent = engine.ctx.state;
+  if (!an) return;
+  if (!td || td.length !== an.fftSize) { td = new Float32Array(an.fftSize); fd = new Uint8Array(an.frequencyBinCount); }
+  an.getFloatTimeDomainData(td);
+  an.getByteFrequencyData(fd);
+
+  // scope
+  const W = scope.width, H = scope.height;
+  sctx.fillStyle = '#04070c'; sctx.fillRect(0, 0, W, H);
+  sctx.strokeStyle = '#101c28'; sctx.lineWidth = 1;
+  sctx.beginPath(); sctx.moveTo(0, H / 2); sctx.lineTo(W, H / 2); sctx.stroke();
+  sctx.strokeStyle = '#38e1ff'; sctx.lineWidth = 1.25; sctx.beginPath();
+  let peak = 0;
+  for (let i = 0; i < td.length; i++) {
+    const a = Math.abs(td[i]); if (a > peak) peak = a;
+    const x = (i / (td.length - 1)) * W;
+    const y = H / 2 - td[i] * (H / 2 - 4);
+    i ? sctx.lineTo(x, y) : sctx.moveTo(x, y);
+  }
+  sctx.stroke();
+  sctx.fillStyle = peak > 0.99 ? '#ff5f6d' : '#5d7086';
+  sctx.font = '11px monospace';
+  sctx.fillText('peak ' + peak.toFixed(3), 8, 14);
+
+  // spectrum
+  const W2 = spec.width, H2 = spec.height;
+  pctx.fillStyle = '#04070c'; pctx.fillRect(0, 0, W2, H2);
+  const n = fd.length;
+  for (let i = 0; i < n; i++) {
+    const f = Math.pow(i / n, 0.42);
+    const x = f * W2;
+    const w = Math.max(1, (Math.pow((i + 1) / n, 0.42) - f) * W2);
+    const v = fd[i] / 255;
+    const h = v * (H2 - 6);
+    pctx.fillStyle = `hsl(${190 - v * 60},90%,${25 + v * 40}%)`;
+    pctx.fillRect(x, H2 - h, w, h);
+  }
+  pctx.strokeStyle = '#101c28';
+  for (const hz of [100, 1000, 10000]) {
+    const i = hz / (engine.ctx.sampleRate / 2) * n;
+    const x = Math.pow(i / n, 0.42) * W2;
+    pctx.beginPath(); pctx.moveTo(x, 0); pctx.lineTo(x, H2); pctx.stroke();
+    pctx.fillStyle = '#3d4c5e'; pctx.font = '9px monospace';
+    pctx.fillText(hz >= 1000 ? (hz / 1000) + 'k' : hz, x + 3, H2 - 3);
+  }
+}
+
+/* ------------------------------------------------ offline tests -- */
+const SR = 44100;
+// Chrome's DynamicsCompressorNode has a ~0.5 s start-up transient on a brand-new
+// context (it recovers from full gain reduction). Offset every measured one-shot
+// past it so the numbers reflect the real mix, not the compressor warming up.
+const WARM = 0.6;
+
+function analyse(buf) {
+  let peak = 0, sum = 0, nan = 0, n = 0;
+  const tailFrom = Math.floor(buf.length * 0.94);
+  let tailSum = 0, tailN = 0;
+  for (let c = 0; c < buf.numberOfChannels; c++) {
+    const d = buf.getChannelData(c);
+    for (let i = 0; i < d.length; i++) {
+      const s = d[i];
+      if (!Number.isFinite(s)) { nan++; continue; }
+      const a = Math.abs(s);
+      if (a > peak) peak = a;
+      sum += s * s; n++;
+      if (i >= tailFrom) { tailSum += s * s; tailN++; }
+    }
+  }
+  return {
+    peak, rms: Math.sqrt(sum / Math.max(1, n)),
+    tail: Math.sqrt(tailSum / Math.max(1, tailN)),
+    nan, dur: buf.duration,
+  };
+}
+
+async function renderCase(name, seconds, setup) {
+  const OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+  const ctx = new OAC(2, Math.ceil(SR * seconds), SR);
+  const eng = new AudioEngine();
+  await eng.init({ context: ctx });
+  setup(eng, ctx);
+  const buf = await ctx.startRendering();
+  try { eng.dispose(); } catch (e) { /* offline ctx already done */ }
+  const a = analyse(buf);
+  a.name = name;
+  return a;
+}
+
+function addRow(a, pass, note) {
+  const tr = document.createElement('tr');
+  tr.className = pass ? 'pass' : 'fail';
+  tr.innerHTML =
+    `<td class="n">${a.name}</td><td>${a.peak.toFixed(4)}</td><td>${a.rms.toFixed(5)}</td>` +
+    `<td>${a.dur.toFixed(2)}</td><td>${a.tail.toFixed(5)}</td><td>${a.nan}</td>` +
+    `<td class="st">${pass ? 'PASS' : 'FAIL ' + note}</td>`;
+  $('tbl').querySelector('tbody').appendChild(tr);
+}
+
+async function runTests() {
+  $('tbl').querySelector('tbody').innerHTML = '';
+  $('sumStatus').textContent = 'running…';
+  const results = [];
+  let fails = 0;
+
+  // --- one-shots ---
+  for (const name of CATALOGUE) {
+    const secs = 7.2;
+    const a = await renderCase(name, secs, (eng) => {
+      eng.play(name, name === 'footstep'
+        ? { surface: 'rock', speed: 1, delay: WARM } : { delay: WARM });
+    });
+    const checks = [];
+    if (!(a.rms > 1e-5)) checks.push('silent');
+    if (!(a.peak <= 1.0)) checks.push('clip');
+    if (!(a.nan === 0)) checks.push('nan');
+    if (!(a.tail < 0.004)) checks.push('stuck-voice');
+    const pass = checks.length === 0;
+    if (!pass) fails++;
+    a.kind = 'one-shot'; a.pass = pass; a.note = checks.join(',');
+    results.push(a);
+    addRow(a, pass, a.note);
+    await new Promise((r) => setTimeout(r, 0));
+  }
+
+  // --- footstep surfaces ---
+  for (const surf of ['rock', 'sand', 'ice', 'metal', 'grass']) {
+    const a = await renderCase('footstep:' + surf, 4.6, (eng) => {
+      for (let i = 0; i < 6; i++) eng.play('footstep', { surface: surf, speed: 0.8, delay: WARM + i * 0.36 });
+    });
+    const checks = [];
+    if (!(a.rms > 1e-5)) checks.push('silent');
+    if (a.peak > 1.0) checks.push('clip');
+    if (a.nan) checks.push('nan');
+    if (!(a.tail < 0.004)) checks.push('stuck-voice');
+    const pass = !checks.length; if (!pass) fails++;
+    a.kind = 'footstep'; a.pass = pass; a.note = checks.join(',');
+    results.push(a); addRow(a, pass, a.note);
+  }
+
+  // --- music moods ---
+  for (const mood of MUSIC_MOODS) {
+    const a = await renderCase('music:' + mood, 18, (eng) => {
+      eng.startMusic(mood);
+      eng._pumpMusic(18.5);            // schedule the whole render window offline
+    });
+    const checks = [];
+    if (!(a.rms > 1e-4)) checks.push('silent');
+    if (a.peak > 1.0) checks.push('clip');
+    if (a.nan) checks.push('nan');
+    const pass = !checks.length; if (!pass) fails++;
+    a.kind = 'music'; a.pass = pass; a.note = checks.join(',');
+    results.push(a); addRow(a, pass, a.note);
+  }
+
+  // --- music stop decays to silence ---
+  {
+    const a = await renderCase('music:stop-decay', 16, (eng) => {
+      eng.startMusic('wonder');
+      eng._pumpMusic(6);
+      eng.stopMusic(2);
+    });
+    const checks = [];
+    if (a.peak > 1.0) checks.push('clip');
+    if (a.nan) checks.push('nan');
+    if (!(a.tail < 0.004)) checks.push('no-decay');
+    const pass = !checks.length; if (!pass) fails++;
+    a.kind = 'music'; a.pass = pass; a.note = checks.join(',');
+    results.push(a); addRow(a, pass, a.note);
+  }
+
+  // --- ambience profiles ---
+  for (const p of AMBIENCE_PROFILES) {
+    const a = await renderCase('amb:' + p, 12, (eng) => {
+      eng.startAmbience(p);
+      eng._pumpAmbience(12.5);
+    });
+    const checks = [];
+    if (!(a.rms > 1e-4)) checks.push('silent');
+    if (a.peak > 1.0) checks.push('clip');
+    if (a.nan) checks.push('nan');
+    const pass = !checks.length; if (!pass) fails++;
+    a.kind = 'ambience'; a.pass = pass; a.note = checks.join(',');
+    results.push(a); addRow(a, pass, a.note);
+  }
+
+  // --- ship engine sweep ---
+  {
+    const a = await renderCase('engine:sweep', 8, (eng, ctx) => {
+      eng.setEngine(0.05, 0);
+      // Offline: setTargetAtTime schedules from currentTime(0); emulate a ramp by
+      // scheduling the underlying params directly through repeated setEngine calls
+      // is not possible, so verify the static rig instead at a high throttle.
+      eng.setEngine(0.85, 0.5);
+    });
+    const checks = [];
+    if (!(a.rms > 1e-4)) checks.push('silent');
+    if (a.peak > 1.0) checks.push('clip');
+    if (a.nan) checks.push('nan');
+    const pass = !checks.length; if (!pass) fails++;
+    a.kind = 'engine'; a.pass = pass; a.note = checks.join(',');
+    results.push(a); addRow(a, pass, a.note);
+  }
+
+  // --- reverb spaces (impulse response sanity) ---
+  for (const sp of REVERB_SPACE_NAMES) {
+    const a = await renderCase('space:' + sp, 12, (eng) => {
+      eng.setSpace(sp, 0);
+      eng.play('ui.click', { reverb: 1.0, gain: 1, delay: WARM });
+    });
+    const checks = [];
+    if (!(a.rms > 1e-6)) checks.push('silent');
+    if (a.peak > 1.0) checks.push('clip');
+    if (a.nan) checks.push('nan');
+    if (!(a.tail < 0.004)) checks.push('endless-tail');
+    const pass = !checks.length; if (!pass) fails++;
+    a.kind = 'reverb'; a.pass = pass; a.note = checks.join(',');
+    results.push(a); addRow(a, pass, a.note);
+  }
+
+  // --- density / clipping stress: everything at once ---
+  {
+    const a = await renderCase('stress:all-at-once', 10, (eng) => {
+      eng.startMusic('finale'); eng._pumpMusic(10.5);
+      eng.startAmbience('nexus'); eng._pumpAmbience(10.5);
+      eng.setEngine(1, 1);
+      let d = WARM;
+      for (const n of CATALOGUE) { eng.play(n, { delay: d, surface: 'metal' }); d += 0.12; }
+    });
+    const checks = [];
+    if (!(a.rms > 1e-4)) checks.push('silent');
+    if (a.peak > 1.0) checks.push('clip');
+    if (a.nan) checks.push('nan');
+    const pass = !checks.length; if (!pass) fails++;
+    a.kind = 'stress'; a.pass = pass; a.note = checks.join(',');
+    results.push(a); addRow(a, pass, a.note);
+  }
+
+  const maxPeak = results.reduce((m, r) => Math.max(m, r.peak), 0);
+  $('summary').innerHTML =
+    `<span class="k">cases</span> ${results.length} · ` +
+    `<span class="k">failures</span> <span class="${fails ? 'bad' : 'ok'}">${fails}</span> · ` +
+    `<span class="k">max peak</span> <span class="${maxPeak > 1 ? 'bad' : 'ok'}">${maxPeak.toFixed(4)}</span> · ` +
+    `<span class="k">console errors</span> <span class="${errors.length ? 'bad' : 'ok'}">${errors.length}</span>` +
+    `<br><span class="k">status</span> <span id="sumStatus" class="${fails ? 'bad' : 'ok'}">${fails ? 'FAIL' : 'ALL PASS'}</span>`;
+  window.__testResults = { results, fails, maxPeak, errors: errors.slice() };
+  log('offline tests complete: ' + results.length + ' cases, ' + fails + ' failures, maxPeak=' + maxPeak.toFixed(4));
+  return window.__testResults;
+}
+window.__runTests = runTests;
+$('btnTest').addEventListener('click', runTests);
+
+/* ------------------------------------------------ leak test ----- */
+async function runLeakTest() {
+  await ensureInit();
+  if (!engine.ready) { log('leak test skipped (no ctx)', true); return null; }
+  const baseline = engine.stats().voices;
+  const baselineNodes = engine.stats().nodes;
+  log('leak test: baseline voices=' + baseline + ' nodes=' + baselineNodes);
+  const names = CATALOGUE.filter((n) => n !== 'scan.loop');
+  for (let i = 0; i < 200; i++) {
+    const n = names[i % names.length];
+    engine.play(n, n === 'footstep' ? { surface: 'ice', speed: 1 } : {});
+  }
+  const peakVoices = engine.stats().voices;
+  const peakNodes = engine.stats().nodes;
+  // Wait for the longest tail (~3.6s) plus margin.
+  await new Promise((r) => setTimeout(r, 8000));
+  engine.update(0.016, null);
+  const after = engine.stats();
+  // With nothing continuous running, every transient voice+node must be gone.
+  const result = {
+    baseline, peakVoices, peakNodes,
+    afterVoices: after.voices, afterNodes: after.nodes,
+    pass: after.voices <= baseline && after.nodes <= baselineNodes,
+  };
+  window.__leakResult = result;
+  log('leak test: peak voices=' + peakVoices + ' nodes=' + peakNodes +
+      ' -> after voices=' + after.voices + ' nodes=' + after.nodes + ' ' + (result.pass ? 'PASS' : 'FAIL'));
+  const el = document.createElement('div');
+  el.style.marginTop = '6px';
+  el.innerHTML = `<span class="tag">leak test</span> peak ${peakVoices} voices / ${peakNodes} nodes → ` +
+    `after ${after.voices} voices / ${after.nodes} nodes · ` +
+    `<b style="color:${result.pass ? 'var(--ok)' : 'var(--bad)'}">${result.pass ? 'PASS' : 'FAIL'}</b>`;
+  $('summary').appendChild(el);
+  return result;
+}
+window.__runLeakTest = runLeakTest;
+$('btnLeak').addEventListener('click', runLeakTest);
+
+draw();
+log('ready — ' + CATALOGUE.length + ' one-shots, ' + MUSIC_MOODS.length + ' moods, ' +
+    AMBIENCE_PROFILES.length + ' ambiences, ' + REVERB_SPACE_NAMES.length + ' spaces');
+</script>
+</body>
+</html>
