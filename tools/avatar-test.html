@@ -1,0 +1,101 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>avatar test</title>
+<style>html,body{margin:0;height:100%;background:#000;overflow:hidden}canvas{display:block;width:100vw;height:100vh}
+#log{position:fixed;left:8px;top:8px;color:#7fe;font:12px ui-monospace,monospace;white-space:pre;z-index:10}</style>
+</head><body><canvas id="c"></canvas><div id="log"></div>
+<script type="module">
+import * as THREE from '../vendor/three.module.js';
+import { Engine, LAYER } from '../src/core/engine.js';
+import { Avatar, defaultConfig, randomConfig, AVATAR_SCHEMA } from '../src/player/avatar.js';
+
+const errs = []; window.addEventListener('error', e => errs.push(e.message));
+const engine = new Engine(document.getElementById('c'), { quality: 'high' });
+const scene = engine.scene;
+
+// Studio rig: key / fill / rim. This is the lighting a character creator
+// should use — it reads form without hiding detail in black.
+const key = new THREE.DirectionalLight(0xfff0dd, 3.4);
+key.position.set(2.2, 3.0, 2.6); key.castShadow = true;
+key.shadow.mapSize.set(2048, 2048);
+key.shadow.camera.left = -2; key.shadow.camera.right = 2;
+key.shadow.camera.top = 3; key.shadow.camera.bottom = -1;
+key.shadow.camera.near = 0.5; key.shadow.camera.far = 12;
+key.shadow.bias = -0.0009; key.shadow.normalBias = 0.02;
+key.layers.enableAll();
+scene.add(key);
+
+const fill = new THREE.DirectionalLight(0x8fb4ff, 0.85);
+fill.position.set(-3.0, 1.4, 1.6); fill.layers.enableAll(); scene.add(fill);
+
+const rim = new THREE.DirectionalLight(0xffd9a8, 2.6);
+rim.position.set(-1.4, 2.2, -3.2); rim.layers.enableAll(); scene.add(rim);
+
+scene.add(new THREE.HemisphereLight(0x5a6a86, 0x241c16, 0.55));
+
+// Simple IBL so metals and the visor have something to reflect.
+const pmrem = new THREE.PMREMGenerator(engine.renderer);
+const envScene = new THREE.Scene();
+const envGeo = new THREE.SphereGeometry(10, 32, 16);
+const envMat = new THREE.ShaderMaterial({
+  side: THREE.BackSide,
+  vertexShader: 'varying vec3 vP; void main(){ vP = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
+  fragmentShader: `varying vec3 vP;
+    void main(){
+      vec3 d = normalize(vP);
+      vec3 sky = mix(vec3(0.05,0.07,0.11), vec3(0.30,0.38,0.52), smoothstep(-0.2,0.8,d.y));
+      vec3 ground = vec3(0.07,0.06,0.05);
+      vec3 c = mix(ground, sky, smoothstep(-0.08,0.08,d.y));
+      c += vec3(1.6,1.35,1.0) * pow(max(0.0, dot(d, normalize(vec3(0.5,0.6,0.55)))), 48.0);
+      gl_FragColor = vec4(c,1.0);
+    }`,
+});
+envScene.add(new THREE.Mesh(envGeo, envMat));
+const envRT = pmrem.fromScene(envScene, 0, 0.1, 100);
+scene.environment = envRT.texture;
+
+const floor = new THREE.Mesh(
+  new THREE.CircleGeometry(3.2, 64),
+  new THREE.MeshStandardMaterial({ color: 0x14161a, roughness: 0.62, metalness: 0.1 })
+);
+floor.rotation.x = -Math.PI / 2;
+floor.receiveShadow = true;
+floor.layers.set(LAYER.NEAR);
+scene.add(floor);
+engine.post.patchMaterial(floor.material);
+
+let avatar = new Avatar(engine, defaultConfig());
+scene.add(avatar.group);
+
+engine.post.params.autoExposure = true;
+engine.post.params.bloomStrength = 0.05;
+engine.post.params.dofStrength = 0.6;
+engine.post.params.dofFocus = 2.6;
+engine.post.params.dofRange = 3.2;
+engine.post.params.grainAmount = 0.018;
+engine.post.params.vignetteAmount = 0.34;
+
+let camAngle = 0.35, camHeight = 1.15, camDist = 2.5, frames = 0;
+function place() {
+  engine.camera.position.set(Math.sin(camAngle) * camDist, camHeight, Math.cos(camAngle) * camDist);
+  engine.camera.lookAt(0, camHeight * 0.92, 0);
+}
+
+window.__setCam = (a, h, d) => { camAngle = a; camHeight = h; camDist = d; engine.post._historyValid = false; };
+window.__setConfig = (patch) => {
+  scene.remove(avatar.group); avatar.dispose();
+  avatar = new Avatar(engine, { ...defaultConfig(), ...patch });
+  scene.add(avatar.group);
+  engine.post._historyValid = false;
+};
+window.__random = (seed) => window.__setConfig(randomConfig(seed));
+window.__schema = AVATAR_SCHEMA;
+window.__engine = engine;
+window.__step = (n = 1) => {
+  for (let i = 0; i < n; i++) { place(); engine.render(1 / 60); frames++; }
+  document.getElementById('log').textContent =
+    `frames ${frames}  tris ${engine.stats.triangles}  draws ${engine.stats.drawCalls}  errs ${errs.length}`;
+  return { frames, errors: errs.slice(0, 6), tris: engine.stats.triangles, draws: engine.stats.drawCalls };
+};
+engine.setAdaptive(false);
+window.__ready = true;
+</script></body></html>
