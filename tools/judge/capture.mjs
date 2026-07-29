@@ -9,11 +9,11 @@
 //
 // Output: tools/judge/shots/round-<n>/NN-name.png
 import { launch } from '../shoot.mjs';
-import { mkdirSync, writeFileSync } from 'fs';
+import { mkdirSync, writeFileSync, existsSync } from 'fs';
 
 const ROUND = process.argv[2] || '1';
-const W = +(process.argv[3] || 1600);
-const H = +(process.argv[4] || 900);
+const W = +(process.argv[3] || 1280);
+const H = +(process.argv[4] || 720);
 const DIR = `/home/user/Windows-Debloat-Tool/tools/judge/shots/round-${ROUND}`;
 mkdirSync(DIR, { recursive: true });
 
@@ -41,8 +41,9 @@ const browser = await launch();
   const ev = (fn, a) => page.evaluate(fn, a).catch(e => { errors.push('EVAL: ' + e.message); return null; });
   const step = (n = 5) => ev(k => window.__step(k), n);
   const shot = async (name, note) => {
-    await page.screenshot({ path: `${DIR}/${name}.png`, timeout: 240000 });
     manifest.push({ file: name + '.png', note });
+    if (existsSync(`${DIR}/${name}.png`)) { console.log('   (skip)', name); return; }
+    await page.screenshot({ path: `${DIR}/${name}.png`, timeout: 240000 });
     console.log('  ', name);
   };
 
@@ -57,7 +58,7 @@ const browser = await launch();
   await shot('02-title', 'Main menu over the live 3D background');
 
   await ev(() => window.__game._enterCreator());
-  await page.waitForTimeout(1200); await step(8);
+  await page.waitForTimeout(1200); await step(5);
   await shot('03-creator', 'Character creator, full body, studio 3-point rig');
 
   // Face close-up with DOF refocused for the shorter camera distance.
@@ -78,14 +79,14 @@ const browser = await launch();
     g._frozenCam = true;
     g.invalidateHistory();
   });
-  await step(8);
+  await step(5);
   await shot('04-creator-face', 'Character creator, face close-up (helmet off)');
 
   await ev(() => { const g = window.__game; g._frozenCam = false; g.avatarConfig.helmet = 'Visor'; g._rebuildAvatar(); });
 
   await ev(() => window.__game._materialize({}));
   for (let i = 0; i < 9; i++) { await page.waitForTimeout(900); await step(2); }
-  await step(8);
+  await step(5);
   await shot('05-surface-wide', 'Planet surface, third person, low raking sun');
 
   await ev(() => {
@@ -93,7 +94,7 @@ const browser = await launch();
     g.controller.yaw += 1.35; g.controller.pitch = 0.06;
     g.invalidateHistory();
   });
-  await step(8);
+  await step(5);
   await shot('06-surface-vista', 'Surface vista toward the horizon and sky');
 
   // First person.
@@ -103,7 +104,7 @@ const browser = await launch();
     g.controller.pitch = -0.02;
     g.invalidateHistory();
   });
-  await step(8);
+  await step(5);
   await shot('07-first-person', 'First person surface view with HUD');
 
   // Anchor landmark, framed.
@@ -116,7 +117,7 @@ const browser = await launch();
     g.controller.pitch = 0.10;
     g.invalidateHistory();
   });
-  await step(8);
+  await step(5);
   await shot('08-anchor', 'Anchor monolith landmark, close approach');
 
   // Companion planet in the sky.
@@ -125,7 +126,7 @@ const browser = await launch();
     g.controller.yaw = c.azimuth; g.controller.pitch = -c.elevation;
     g.invalidateHistory();
   });
-  await step(8);
+  await step(5);
   await shot('09-companion-sky', 'Companion world hanging in the sky from the surface');
 
   // Scan interaction with the HUD in its detailed state.
@@ -177,8 +178,9 @@ const browser = await launch();
   attach(page);
   const ev = (fn, a) => page.evaluate(fn, a).catch(e => { errors.push('EVAL(planet): ' + e.message); return null; });
   const shot = async (name, note) => {
-    await page.screenshot({ path: `${DIR}/${name}.png`, timeout: 240000 });
     manifest.push({ file: name + '.png', note });
+    if (existsSync(`${DIR}/${name}.png`)) { console.log('   (skip)', name); return; }
+    await page.screenshot({ path: `${DIR}/${name}.png`, timeout: 240000 });
     console.log('  ', name);
   };
 
@@ -198,7 +200,7 @@ const browser = await launch();
       window.__setSun?.(x, y);
       window.__engine.post._historyValid = false;
     }, [dist, sx, sy, type]);
-    await ev(() => window.__step(8));
+    await ev(() => window.__step(5));
     await shot(name, note);
   }
   await page.close();
