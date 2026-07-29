@@ -212,12 +212,15 @@ export class World {
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
     sun.shadow.camera.updateProjectionMatrix();
-    const S = 90;
+    const S = 55;   // tighter frustum = more shadow texels on the player
     sun.shadow.camera.left = -S; sun.shadow.camera.right = S;
     sun.shadow.camera.top = S; sun.shadow.camera.bottom = -S;
     sun.shadow.camera.near = 1; sun.shadow.camera.far = 1600;
-    sun.shadow.bias = -0.0004;
-    sun.shadow.normalBias = 0.04;
+    // A large normalBias pushes the shadow caster along its normal and detaches
+    // the contact point — the character's shadow ends up a body-width from the
+    // boots. Keep it small and lean on a tighter depth bias instead.
+    sun.shadow.bias = -0.00025;
+    sun.shadow.normalBias = 0.008;
     sun.layers.enableAll();
     this.sun = sun;
     this.group.add(sun);

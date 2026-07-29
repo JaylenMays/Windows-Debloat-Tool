@@ -592,6 +592,14 @@ window.__game = game;
 // software rasterisation, which makes every wait time out.
 const MANUAL = new URLSearchParams(location.search).has('manual');
 
+// Adaptive resolution trades pixels for frame time. That is right on real
+// hardware, but under software rasterisation the budget is never met, so it
+// pins to its 0.55 floor and every frame is upscaled from 55% — which reads as
+// a heavy uniform blur over the whole image, including on the in-focus subject.
+// Manual mode is only ever used for verification captures, so it renders at
+// native resolution.
+if (MANUAL) game.engine.setAdaptive(false);
+
 let last = performance.now();
 let running = true;
 function loop() {

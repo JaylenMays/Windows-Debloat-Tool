@@ -195,7 +195,9 @@ export class Engine {
     this._fpsAccum = []; this._lastStatsUpdate = 0;
 
     // Adaptive resolution: keeps frame time under budget by trading pixels.
-    this.adaptive = { enabled: true, target: 16.7, min: 0.55, max: 1.0, current: 1.0, _accum: [] };
+    // The floor is 0.78 rather than 0.55: below that the upscale blur is more
+    // damaging to perceived quality than the framerate it buys back.
+    this.adaptive = { enabled: true, target: 16.7, min: 0.78, max: 1.0, current: 1.0, _accum: [] };
 
     this.resize();
   }
