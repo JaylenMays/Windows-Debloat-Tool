@@ -193,20 +193,26 @@ export class World {
     sun.position.copy(this.sunDir).multiplyScalar(600);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
-    const S = 160;
+    sun.shadow.camera.updateProjectionMatrix();
+    const S = 90;
     sun.shadow.camera.left = -S; sun.shadow.camera.right = S;
     sun.shadow.camera.top = S; sun.shadow.camera.bottom = -S;
-    sun.shadow.camera.near = 1; sun.shadow.camera.far = 1400;
-    sun.shadow.bias = -0.0006;
-    sun.shadow.normalBias = 0.35;
+    sun.shadow.camera.near = 1; sun.shadow.camera.far = 1600;
+    sun.shadow.bias = -0.0004;
+    sun.shadow.normalBias = 0.04;
     sun.layers.enableAll();
     this.sun = sun;
     this.group.add(sun);
     this.group.add(sun.target);
 
+    // Lights are collected per layer-camera, so a light left on the default
+    // layer contributes to nothing the scale-layered renderer draws. Without
+    // enableAll() the terrain gets direct sun only and every shadowed slope
+    // crushes to black.
     const amb = new THREE.HemisphereLight(
-      new THREE.Color(...this.biome.ambient).multiplyScalar(1.5),
-      new THREE.Color(...this.biome.low).multiplyScalar(0.5), 0.85);
+      new THREE.Color(...this.biome.ambient).multiplyScalar(1.9),
+      new THREE.Color(...this.biome.low).multiplyScalar(0.7), 1.15);
+    amb.layers.enableAll();
     this.group.add(amb);
   }
 

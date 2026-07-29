@@ -68,7 +68,16 @@ class Game {
     // Any UI sound request routes to the synth; the UI never imports audio.
     ui.el.addEventListener('ui:sfx', (e) => this.audio.play('ui.' + (e.detail?.name || 'click')));
 
-    ui.on('ui:boot-done', () => { ui.showScreen('title'); this.audio.startMusic('menu'); });
+    // The boot animation resolves asynchronously and fires this whenever it
+    // finishes — including after the player (or a test harness) has already
+    // moved on. Without the guard it re-shows the title menu on top of live
+    // gameplay.
+    ui.on('ui:boot-done', () => {
+      if (this.state !== STATE.BOOT) return;
+      ui.showScreen('title');
+      this.state = STATE.TITLE;
+      this.audio.startMusic('menu');
+    });
     ui.on('ui:start', () => this._enterCreator());
     ui.on('ui:creator-change', (d) => this._onCreatorChange(d));
     ui.on('ui:creator-random', () => {

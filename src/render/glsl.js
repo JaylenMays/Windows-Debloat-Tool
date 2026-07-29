@@ -154,10 +154,12 @@ export const DITHER = /* glsl */ `
 // Triangular PDF dither. Applied just before 8-bit quantisation this removes the
 // contour bands you otherwise get across large smooth gradients.
 vec3 ditherTriangular(vec3 color, vec2 fragCoord, float amount){
-  float r0 = ign(fragCoord);
-  float r1 = ign(fragCoord + 17.0);
-  float r2 = ign(fragCoord + 43.0);
-  vec3 rnd = vec3(r0, r1, r2);
+  // Hash-based, not lattice-based. ign() is periodic, so using it here leaves
+  // a fixed woven pattern sitting on every flat region of the frame.
+  vec3 rnd = vec3(
+    hash12(fragCoord),
+    hash12(fragCoord + 17.0),
+    hash12(fragCoord + 43.0));
   vec3 tri = (rnd + fract(rnd * 3.7)) - 0.5;   // approx triangular distribution
   return color + tri * amount;
 }

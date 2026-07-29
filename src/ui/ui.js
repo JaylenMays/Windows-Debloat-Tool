@@ -23,6 +23,10 @@ import { buildCredits } from './credits.js';
 
 const MODAL = ['boot', 'title', 'creator', 'loading', 'codex', 'starmap', 'pause', 'settings', 'credits'];
 
+// Screens that can be opened while the player is in the world. Opening one
+// hides the HUD; closing it restores the HUD via showScreen('hud').
+const MODAL_OVER_HUD = new Set(['starmap', 'codex', 'pause', 'settings', 'credits']);
+
 export class UI extends EventTarget {
   constructor(root = document.body) {
     super();
@@ -136,7 +140,20 @@ export class UI extends EventTarget {
   showScreen(name, data) {
     const s = this.screens[name];
     if (!s) return this;
-    if (name === 'hud') return this.showHUD(true);
+
+    // The HUD is a persistent layer, not a member of the modal stack. Showing
+    // it therefore has to explicitly dismiss whatever modal is up — otherwise
+    // the title or loading screen stays composited on top of live gameplay,
+    // and its text collides with the HUD's.
+    if (name === 'hud') {
+      if (this.active) this.hideScreen(this.active);
+      this._stack.length = 0;
+      return this.showHUD(true);
+    }
+
+    // Conversely, a modal opened from gameplay hides the HUD, so the two can
+    // never write to the same pixels.
+    if (MODAL_OVER_HUD.has(name)) this.showHUD(false);
 
     if (this.active && this.active !== name) {
       const prev = this.screens[this.active];

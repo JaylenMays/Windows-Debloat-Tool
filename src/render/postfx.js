@@ -98,7 +98,12 @@ export class PostFX {
     this.quad = new FSQuad();
     this.enabled = {
       ssao: true, volumetrics: true, taa: true, bloom: true,
-      dof: true, motionBlur: true, grain: true, chromatic: true, vignette: true,
+      dof: true, grain: true, chromatic: true, vignette: true,
+      // Camera-reprojection motion blur smears world-static geometry (the
+      // player included) whenever the camera moves, resolving into discrete
+      // ghost copies rather than a smear. Needs a per-object velocity buffer
+      // before it can be re-enabled.
+      motionBlur: false,
     };
     this.params = {
       exposure: 1.0, exposureCompensation: 0.0, autoExposure: true,
@@ -756,11 +761,17 @@ export class PostFX {
         float vig = 1.0 - uVignette * smoothstep(0.15, 0.85, r2 * 1.6);
         color *= vig;
 
-        // Film grain: scales with darkness the way real film does.
+        // Film grain.
+        //
+        // Interleaved gradient noise is a fixed periodic lattice — held still
+        // it reads as a woven screen-door pattern rather than as grain. A
+        // hash over (pixel, frame) decorrelates it both spatially and in time.
         if(uGrain > 0.001){
-          float n = ign(gl_FragCoord.xy + fract(uTime) * 1000.0);
+          float n = hash13(vec3(gl_FragCoord.xy, floor(uTime * 60.0)));
+          float n2 = hash13(vec3(gl_FragCoord.yx + 17.3, floor(uTime * 60.0) + 5.0));
+          float g = (n + n2) * 0.5;            // triangular PDF, less harsh
           float lumFactor = 1.0 - smoothstep(0.0, 0.7, luma3(color));
-          color += (n - 0.5) * uGrain * (0.35 + lumFactor);
+          color += (g - 0.5) * uGrain * (0.35 + lumFactor);
         }
 
         color = clamp(color, 0.0, 1.0);

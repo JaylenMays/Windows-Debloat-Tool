@@ -109,100 +109,59 @@ export const BIOME_PRESETS = {
   },
 };
 
-const TERRAIN_VERT = /* glsl */ `
-uniform sampler2D uHeight;
-uniform vec2 uOrigin;        // world XZ of the heightmap corner
-uniform float uExtent;       // world size covered by the heightmap
-uniform float uRelief;
-uniform vec3 uCamXZ;
+/* ---------------------------------------------------------------------- *
+ * Terrain shading is injected into a MeshStandardMaterial rather than being
+ * a standalone ShaderMaterial.
+ *
+ * A raw ShaderMaterial sits outside three's lighting system entirely, which
+ * means the ground cannot RECEIVE shadows — so the character, the rocks and
+ * the anchors all appeared to float on an unshadowed surface. Going through
+ * MeshStandardMaterial buys shadow receiving, image-based lighting and the
+ * screen-space AO injection for free; the height-field displacement and biome
+ * shading are patched in via onBeforeCompile.
+ * ---------------------------------------------------------------------- */
 
-varying vec3 vWorld;
-varying vec2 vHUv;
-varying float vHeight;
-varying float vSlope;
-
-float sampleH(vec2 worldXZ){
-  vec2 uv = (worldXZ - uOrigin) / uExtent;
-  return texture2D(uHeight, clamp(uv, 0.002, 0.998)).r;
-}
-
-void main(){
-  // Grid vertices are placed in world space relative to the camera so the
-  // clipmap can be recentred without rebuilding geometry.
-  vec3 wp = position;
-  wp.x += uCamXZ.x;
-  wp.z += uCamXZ.z;
-
-  float h = sampleH(wp.xz);
-  wp.y = h * uRelief;
-
-  // Central differences for the normal, at the heightmap's own texel size.
-  float e = uExtent / 1024.0;
-  float hx = sampleH(wp.xz + vec2(e, 0.0)) * uRelief;
-  float hz = sampleH(wp.xz + vec2(0.0, e)) * uRelief;
-  vec3 n = normalize(vec3(h * uRelief - hx, e, h * uRelief - hz));
-
-  vWorld = wp;
-  vHeight = h;
-  vSlope = 1.0 - clamp(n.y, 0.0, 1.0);
-  vHUv = (wp.xz - uOrigin) / uExtent;
-
-  vec4 mv = modelViewMatrix * vec4(wp, 1.0);
-  gl_Position = projectionMatrix * mv;
-
-  vNormalOut = n;
-}
-`;
-
-const TERRAIN_FRAG = /* glsl */ `
-${HASH}
-
-uniform vec3 uLow, uMid, uHigh, uSlopeColor;
-uniform vec3 uSunDir, uSunColor, uAmbient;
-uniform float uRelief, uTime, uRough;
+const TERRAIN_COMMON = /* glsl */ `
 uniform sampler2D uHeight;
 uniform vec2 uOrigin;
 uniform float uExtent;
-uniform sampler2D uDetail;
-uniform float uHasDetail;
+uniform float uRelief;
+uniform vec3 uCamXZ;
 
-varying vec3 vWorld;
-varying vec2 vHUv;
-varying float vHeight;
-varying float vSlope;
+varying vec3 vTWorld;
+varying float vTHeight;
+varying float vTSlope;
 
-float vn(vec2 p){
+float sampleTH(vec2 worldXZ){
+  vec2 uv = (worldXZ - uOrigin) / uExtent;
+  return texture2D(uHeight, clamp(uv, 0.002, 0.998)).r;
+}
+`;
+
+const TERRAIN_FRAG_HELPERS = /* glsl */ `
+float tvn(vec2 p){
   vec2 i = floor(p), f = fract(p);
   f = f * f * (3.0 - 2.0 * f);
   return mix(mix(hash12(i), hash12(i + vec2(1,0)), f.x),
              mix(hash12(i + vec2(0,1)), hash12(i + vec2(1,1)), f.x), f.y);
 }
-float fbm2(vec2 p, int oct){
+float tfbm(vec2 p, int oct){
   float s = 0.0, a = 0.5, n = 0.0;
-  for(int i = 0; i < 7; i++){
+  for(int i = 0; i < 8; i++){
     if(i >= oct) break;
-    s += a * vn(p); n += a; p *= 2.07; a *= 0.5;
+    s += a * tvn(p); n += a; p *= 2.07; a *= 0.5;
   }
   return s / n;
 }
+float sampleHF(vec2 worldXZ){ return sampleTH(worldXZ) * uRelief; }
 
-float sampleHF(vec2 worldXZ){
-  vec2 uv = (worldXZ - uOrigin) / uExtent;
-  return texture2D(uHeight, clamp(uv, 0.002, 0.998)).r * uRelief;
-}
-
-// Terrain shadows by marching the height field toward the sun.
-//
-// The terrain is a custom shader and so sits outside three's shadow map. But
-// a height field can shadow itself analytically for a fraction of the cost:
-// step along the sun direction and check whether the ground ever rises above
-// the ray. This is what gives mountains long raking shadows at low sun, which
-// is most of the difference between "flat grey" and "a landscape".
+// Terrain self-shadowing by marching the height field toward the sun.
+// The shadow map handles objects; this handles mountain-scale terrain-on-
+// terrain occlusion, which a fitted shadow map cannot cover at this range.
 float terrainShadow(vec3 p, vec3 sunDir){
   if(sunDir.y <= 0.01) return 0.0;
   float shadow = 1.0;
   float t = 4.0;
-  // Softening grows with distance, approximating a penumbra.
   for(int i = 0; i < 24; i++){
     vec3 sp = p + sunDir * t;
     float h = sampleHF(sp.xz);
@@ -215,8 +174,7 @@ float terrainShadow(vec3 p, vec3 sunDir){
   return clamp(shadow, 0.0, 1.0);
 }
 
-// Cheap sky occlusion: sample the horizon in a few directions and darken
-// where the surrounding terrain rises. Valleys read as valleys.
+// Cheap sky occlusion so hollows read as hollows.
 float skyOcclusion(vec3 p){
   float occ = 0.0;
   const int N = 6;
@@ -226,64 +184,11 @@ float skyOcclusion(vec3 p){
     float maxSlope = 0.0;
     for(int j = 1; j <= 3; j++){
       float r = float(j) * 26.0;
-      float h = sampleHF(p.xz + d * r);
-      maxSlope = max(maxSlope, (h - p.y) / r);
+      maxSlope = max(maxSlope, (sampleHF(p.xz + d * r) - p.y) / r);
     }
     occ += clamp(maxSlope, 0.0, 1.0);
   }
   return clamp(1.0 - occ / float(N) * 1.1, 0.0, 1.0);
-}
-
-void main(){
-  vec3 n = normalize(vNormalOut);
-
-  // Height/slope driven blend. Real ground is never one flat colour — the
-  // large-scale mix is broken up by a decorrelated mottling field so it does
-  // not read as a gradient ramp.
-  float h = vHeight;
-  float mottle = fbm2(vWorld.xz * 0.02, 5);
-  float hb = clamp(h * 1.15 + (mottle - 0.5) * 0.22, 0.0, 1.0);
-
-  vec3 base = mix(uLow, uMid, smoothstep(0.18, 0.52, hb));
-  base = mix(base, uHigh, smoothstep(0.58, 0.88, hb));
-  // Steep faces expose bare rock regardless of altitude.
-  base = mix(base, uSlopeColor, smoothstep(0.35, 0.72, vSlope));
-
-  // Multi-scale detail so the ground holds up close AND far.
-  float d1 = fbm2(vWorld.xz * 0.9, 4);
-  float d2 = fbm2(vWorld.xz * 6.5, 3);
-  base *= 0.86 + 0.28 * d1;
-  base *= 0.93 + 0.14 * d2;
-
-  // Perturb the normal with the detail field for surface tooth.
-  float eps = 0.35;
-  float ddx = fbm2((vWorld.xz + vec2(eps, 0.0)) * 6.5, 3) - d2;
-  float ddz = fbm2((vWorld.xz + vec2(0.0, eps)) * 6.5, 3) - d2;
-  n = normalize(n + vec3(-ddx, 0.0, -ddz) * 2.4);
-
-  // Direct sun + a hemispheric ambient. Wrapped diffuse keeps the terminator
-  // from going pure black, which is what real bounced light does.
-  float ndl = dot(n, uSunDir);
-  float wrap = clamp((ndl + 0.22) / 1.22, 0.0, 1.0);
-  float shadow = terrainShadow(vWorld, uSunDir);
-  vec3 diffuse = uSunColor * wrap * mix(0.12, 1.0, shadow) * 0.85;
-
-  float sky = skyOcclusion(vWorld);
-  vec3 ambient = uAmbient * (0.45 + 0.55 * n.y) * mix(0.45, 1.0, sky) * 0.75;
-
-  // Warm bounce off lit ground into shadowed faces — without it shadows read
-  // as flat blue holes.
-  vec3 bounce = uSunColor * uLow * 0.22 * (1.0 - n.y * 0.4) * sky * mix(0.5, 1.0, shadow);
-
-  // Rough surfaces still have a broad specular lobe; without it terrain reads
-  // as flat paper under a low sun.
-  vec3 V = normalize(cameraPosition - vWorld);
-  vec3 H = normalize(V + uSunDir);
-  float spec = pow(max(dot(n, H), 0.0), mix(48.0, 8.0, uRough)) * 0.09 * (1.0 - uRough * 0.55);
-
-  vec3 col = base * (diffuse + ambient + bounce) + uSunColor * spec * shadow;
-
-  gl_FragColor = vec4(col, 1.0);
 }
 `;
 
@@ -382,12 +287,81 @@ export class Terrain {
       uHasDetail: { value: 0 },
     };
 
-    this.material = new THREE.ShaderMaterial({
-      uniforms: this.uniforms,
-      vertexShader: 'varying vec3 vNormalOut;\n' + TERRAIN_VERT,
-      fragmentShader: 'varying vec3 vNormalOut;\n' + TERRAIN_FRAG,
-      side: THREE.FrontSide,
+    this.material = new THREE.MeshStandardMaterial({
+      color: 0xffffff, roughness: 0.95, metalness: 0.0,
     });
+    this.material.userData.terrain = this;
+    // Screen-space AO injection (multiplies the indirect term only).
+    this.engine.post.patchMaterial(this.material);
+
+    const U = this.uniforms;
+    this.material.onBeforeCompile = (shader) => {
+      Object.assign(shader.uniforms, U);
+
+      shader.vertexShader = shader.vertexShader
+        .replace('void main() {', TERRAIN_COMMON + '\nvoid main() {')
+        // Displace and build the normal before three derives anything from it.
+        .replace('#include <beginnormal_vertex>', `
+          vec3 tWp = position;
+          tWp.x += uCamXZ.x;
+          tWp.z += uCamXZ.z;
+          float tH = sampleTH(tWp.xz);
+          tWp.y = tH * uRelief;
+          float te = uExtent / 1024.0;
+          float thx = sampleTH(tWp.xz + vec2(te, 0.0)) * uRelief;
+          float thz = sampleTH(tWp.xz + vec2(0.0, te)) * uRelief;
+          vec3 objectNormal = normalize(vec3(tWp.y - thx, te, tWp.y - thz));
+          vTWorld = tWp;
+          vTHeight = tH;
+          vTSlope = 1.0 - clamp(objectNormal.y, 0.0, 1.0);
+        `)
+        .replace('#include <begin_vertex>', 'vec3 transformed = vTWorld;');
+
+      shader.fragmentShader = shader.fragmentShader
+        .replace('void main() {',
+          HASH + '\n' + TERRAIN_COMMON + TERRAIN_FRAG_HELPERS +
+          '\nuniform vec3 uLow, uMid, uHigh, uSlopeColor, uSunDir;\nvoid main() {')
+        .replace('#include <color_fragment>', `
+          #include <color_fragment>
+          {
+            // Height/slope blend, broken up by a decorrelated mottling field so
+            // it does not read as a gradient ramp.
+            float mottle = tfbm(vTWorld.xz * 0.02, 5);
+            float hb = clamp(vTHeight * 1.15 + (mottle - 0.5) * 0.22, 0.0, 1.0);
+            vec3 base = mix(uLow, uMid, smoothstep(0.18, 0.52, hb));
+            base = mix(base, uHigh, smoothstep(0.58, 0.88, hb));
+            base = mix(base, uSlopeColor, smoothstep(0.35, 0.72, vTSlope));
+
+            // Multi-scale detail at decade-separated frequencies so the ground
+            // holds up both underfoot and at the horizon.
+            float d0 = tfbm(vTWorld.xz * 0.09, 4);
+            float d1 = tfbm(vTWorld.xz * 0.9, 4);
+            float d2 = tfbm(vTWorld.xz * 6.5, 3);
+            base *= 0.80 + 0.40 * d0;
+            base *= 0.88 + 0.24 * d1;
+            base *= 0.94 + 0.12 * d2;
+
+            diffuseColor.rgb *= base;
+          }
+        `)
+        .replace('#include <roughnessmap_fragment>', `
+          #include <roughnessmap_fragment>
+          roughnessFactor *= 0.86 + 0.18 * tfbm(vTWorld.xz * 1.7, 3);
+          roughnessFactor = clamp(roughnessFactor, 0.25, 1.0);
+        `)
+        .replace('#include <lights_fragment_begin>', `
+          #include <lights_fragment_begin>
+          {
+            // Composes with the shadow map: that covers objects, this covers
+            // mountain-scale terrain-on-terrain occlusion.
+            float tShadow = terrainShadow(vTWorld, uSunDir);
+            float tSky = skyOcclusion(vTWorld);
+            reflectedLight.directDiffuse *= mix(0.10, 1.0, tShadow);
+            reflectedLight.directSpecular *= mix(0.05, 1.0, tShadow);
+            reflectedLight.indirectDiffuse *= mix(0.45, 1.0, tSky);
+          }
+        `);
+    };
 
     // Clipmap rings: each level covers 4x the area of the previous at the same
     // vertex count, so triangle density falls off with distance automatically.
@@ -420,7 +394,7 @@ export class Terrain {
       const mesh = new THREE.Mesh(geo, this.material);
       mesh.frustumCulled = false;
       mesh.layers.set(LAYER.MID);
-      mesh.receiveShadow = false;
+      mesh.receiveShadow = true;
       mesh.renderOrder = 10 - level;
       this.group.add(mesh);
       this.meshes.push({ mesh, cell });
