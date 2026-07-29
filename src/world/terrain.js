@@ -128,10 +128,6 @@ uniform float uExtent;
 uniform float uRelief;
 uniform vec3 uCamXZ;
 
-varying vec3 vTWorld;
-varying float vTHeight;
-varying float vTSlope;
-
 float sampleTH(vec2 worldXZ){
   vec2 uv = (worldXZ - uOrigin) / uExtent;
   return texture2D(uHeight, clamp(uv, 0.002, 0.998)).r;
@@ -159,17 +155,28 @@ float sampleHF(vec2 worldXZ){ return sampleTH(worldXZ) * uRelief; }
 // The shadow map handles objects; this handles mountain-scale terrain-on-
 // terrain occlusion, which a fitted shadow map cannot cover at this range.
 float terrainShadow(vec3 p, vec3 sunDir){
-  if(sunDir.y <= 0.01) return 0.0;
+  if(sunDir.y <= 0.02) return 0.0;
+
+  // Start the ray slightly above the surface. The height field is sampled on a
+  // ~6 m texel, so a ray launched exactly on the surface immediately reads a
+  // neighbouring texel as "above" it and self-shadows. Without this bias a low
+  // sun makes essentially the whole landscape return 0 and the ground renders
+  // black — which looks exactly like the sky showing through the terrain.
+  float texel = uExtent / 1024.0;
+  vec3 o = p + vec3(0.0, texel * 0.9, 0.0);
+
   float shadow = 1.0;
-  float t = 4.0;
+  float t = texel * 1.5;
   for(int i = 0; i < 24; i++){
-    vec3 sp = p + sunDir * t;
+    vec3 sp = o + sunDir * t;
     float h = sampleHF(sp.xz);
     float diff = sp.y - h;
-    if(diff < 0.0) return 0.0;
-    shadow = min(shadow, 7.0 * diff / t);
-    t *= 1.32;
-    if(t > 2600.0) break;
+    // Soft minimum rather than an early hard return, so the terminator has a
+    // penumbra instead of a binary edge.
+    shadow = min(shadow, 6.0 * diff / t);
+    if(shadow < 0.0) return 0.0;
+    t *= 1.38;
+    if(t > 3000.0) break;
   }
   return clamp(shadow, 0.0, 1.0);
 }
@@ -299,28 +306,26 @@ export class Terrain {
       Object.assign(shader.uniforms, U);
 
       shader.vertexShader = shader.vertexShader
-        .replace('void main() {', TERRAIN_COMMON + '\nvoid main() {')
-        // Displace and build the normal before three derives anything from it.
-        .replace('#include <beginnormal_vertex>', `
-          vec3 tWp = position;
-          tWp.x += uCamXZ.x;
-          tWp.z += uCamXZ.z;
-          float tH = sampleTH(tWp.xz);
-          tWp.y = tH * uRelief;
-          float te = uExtent / 1024.0;
-          float thx = sampleTH(tWp.xz + vec2(te, 0.0)) * uRelief;
-          float thz = sampleTH(tWp.xz + vec2(0.0, te)) * uRelief;
-          vec3 objectNormal = normalize(vec3(tWp.y - thx, te, tWp.y - thz));
-          vTWorld = tWp;
-          vTHeight = tH;
-          vTSlope = 1.0 - clamp(objectNormal.y, 0.0, 1.0);
-        `)
-        .replace('#include <begin_vertex>', 'vec3 transformed = vTWorld;');
+        .replace('void main() {',
+          'attribute vec2 aTerrain;\nvarying vec3 vTWorld;\nvarying float vTHeight;\nvarying float vTSlope;\nvoid main() {')
+        .replace('#include <begin_vertex>', `
+          #include <begin_vertex>
+          // Positions and normals are already baked into the attributes, so
+          // every material — including the MeshNormalMaterial used by the
+          // depth prepass — sees the true displaced surface. Displacing in
+          // this shader instead left the prepass believing the terrain was a
+          // flat plane at y=0, which fed AO, DOF and the volumetrics garbage
+          // depth and crushed the foreground to black.
+          vTWorld = transformed;
+          vTHeight = aTerrain.x;
+          vTSlope = aTerrain.y;
+        `);
 
       shader.fragmentShader = shader.fragmentShader
         .replace('void main() {',
           HASH + '\n' + TERRAIN_COMMON + TERRAIN_FRAG_HELPERS +
-          '\nuniform vec3 uLow, uMid, uHigh, uSlopeColor, uSunDir;\nvoid main() {')
+          '\nvarying vec3 vTWorld;\nvarying float vTHeight;\nvarying float vTSlope;\n' +
+          'uniform vec3 uLow, uMid, uHigh, uSlopeColor, uSunDir;\nvoid main() {')
         .replace('#include <color_fragment>', `
           #include <color_fragment>
           {
@@ -391,6 +396,17 @@ export class Terrain {
         }
         geo.setIndex(keep);
       }
+      // Keep the flat lattice so the bake can re-derive world XZ each recentre.
+      const n = geo.attributes.position.count;
+      geo.setAttribute('aTerrain', new THREE.BufferAttribute(new Float32Array(n * 2), 2));
+      const baseXZ = new Float32Array(n * 2);
+      for (let i = 0; i < n; i++) {
+        baseXZ[i * 2] = geo.attributes.position.getX(i);
+        baseXZ[i * 2 + 1] = geo.attributes.position.getZ(i);
+      }
+      geo.userData.baseXZ = baseXZ;
+      geo.attributes.position.setUsage(THREE.DynamicDrawUsage);
+
       const mesh = new THREE.Mesh(geo, this.material);
       mesh.frustumCulled = false;
       mesh.layers.set(LAYER.MID);
@@ -399,18 +415,58 @@ export class Terrain {
       this.group.add(mesh);
       this.meshes.push({ mesh, cell });
     }
+    this._bakedCenter = null;
+    this._bake(0, 0);
+  }
+
+  // Writes displaced world positions, normals and (height, slope) into the
+  // clipmap attributes. Runs only when the clipmap recentres onto a new snap
+  // cell, so the cost is amortised over many frames.
+  _bake(cx, cz) {
+    const relief = this.biome.relief;
+    const e = this.extent / this.res;          // one heightmap texel, world units
+    for (const { mesh } of this.meshes) {
+      const geo = mesh.geometry;
+      const pos = geo.attributes.position;
+      const nrm = geo.attributes.normal;
+      const ter = geo.attributes.aTerrain;
+      const base = geo.userData.baseXZ;
+      const n = pos.count;
+      for (let i = 0; i < n; i++) {
+        const wx = base[i * 2] + cx;
+        const wz = base[i * 2 + 1] + cz;
+        const h = this.heightAt(wx, wz);
+        pos.setXYZ(i, wx, h, wz);
+
+        // Central differences at texel scale, matching the shading normal.
+        const hx = this.heightAt(wx + e, wz);
+        const hz = this.heightAt(wx, wz + e);
+        let nx = h - hx, ny = e, nz = h - hz;
+        const inv = 1 / Math.hypot(nx, ny, nz);
+        nx *= inv; ny *= inv; nz *= inv;
+        nrm.setXYZ(i, nx, ny, nz);
+        ter.setXY(i, h / relief, 1 - Math.min(1, Math.max(0, ny)));
+      }
+      pos.needsUpdate = true;
+      nrm.needsUpdate = true;
+      ter.needsUpdate = true;
+      geo.computeBoundingSphere();
+    }
+    this._bakedCenter = [cx, cz];
   }
 
   update(dt, camera, sunDir) {
     this.uniforms.uTime.value += dt;
     if (sunDir) this.uniforms.uSunDir.value.copy(sunDir);
-    // Snap the clipmap to the coarsest cell size so vertices don't swim as the
-    // player walks — recentring on a continuous position makes the whole
-    // surface shimmer.
+
+    // Snap to the coarsest cell so vertices don't swim as the player walks.
     const snap = 1.6 * Math.pow(2, 5) * 2;
-    this.uniforms.uCamXZ.value.set(
-      Math.round(camera.position.x / snap) * snap, 0,
-      Math.round(camera.position.z / snap) * snap);
+    const cx = Math.round(camera.position.x / snap) * snap;
+    const cz = Math.round(camera.position.z / snap) * snap;
+    if (!this._bakedCenter || this._bakedCenter[0] !== cx || this._bakedCenter[1] !== cz) {
+      this._bake(cx, cz);
+    }
+    this.uniforms.uCamXZ.value.set(cx, 0, cz);
   }
 
   setSun(dir, color) {

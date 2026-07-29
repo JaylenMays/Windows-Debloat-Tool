@@ -267,6 +267,8 @@ export class PlayerController {
     if (this._camDistCur < 0.6) {
       // First person.
       cam.position.copy(focus);
+      const ghFp = this.groundHeight(cam.position.x, cam.position.z) + 0.25;
+      if (cam.position.y < ghFp) cam.position.y = ghFp;
       _q.setFromEuler(new THREE.Euler(this.pitch, this.yaw, 0, 'YXZ'));
       cam.quaternion.slerp(_q, 1 - Math.exp(-24 * dt));
     } else {
@@ -275,10 +277,17 @@ export class PlayerController {
         -Math.sin(this.pitch),
         Math.cos(this.yaw) * Math.cos(this.pitch));
       const want = focus.clone().addScaledVector(dir, this._camDistCur);
-      // Keep the camera above the ground so it never clips through terrain.
       const gh = this.groundHeight(want.x, want.z) + 0.6;
       if (want.y < gh) want.y = gh;
       cam.position.lerp(want, 1 - Math.exp(-14 * dt));
+
+      // Re-clamp AFTER the interpolation. Clamping only the target lets the
+      // eased position pass below the surface — and a camera inside the
+      // terrain sees straight through it (back faces are culled), so the sky
+      // appears to bleed through the ground.
+      const ghNow = this.groundHeight(cam.position.x, cam.position.z) + 0.6;
+      if (cam.position.y < ghNow) cam.position.y = ghNow;
+
       cam.lookAt(focus);
     }
   }

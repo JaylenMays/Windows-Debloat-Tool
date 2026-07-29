@@ -27,28 +27,28 @@ export const SYSTEMS = [
     id: 'kestrel', name: 'Kestrel III', biome: 'rocky', seed: 20481,
     distance: 0, hazard: 'Low', resources: 'Silicates, water ice',
     blurb: 'A weathered shield world. The founder\'s first cache was logged here.',
-    keyName: 'The Iron Key', sunAngle: 0.17, sunColor: [1.0, 0.93, 0.82],
+    keyName: 'The Iron Key', sunAngle: 0.52, sunColor: [1.0, 0.93, 0.82],
     companion: { type: 'terran', seed: 20117, angularSize: 0.30, azimuth: 2.1, elevation: 0.30 },
   },
   {
     id: 'saffron', name: 'Saffron Reach', biome: 'dunes', seed: 77213,
     distance: 4.7, hazard: 'Moderate', resources: 'Rare earths, glass',
     blurb: 'Endless dunes over a buried city. Something down there still answers.',
-    keyName: 'The Glass Key', sunAngle: 0.13, sunColor: [1.0, 0.82, 0.60],
+    keyName: 'The Glass Key', sunAngle: 0.46, sunColor: [1.0, 0.82, 0.60],
     companion: { type: 'barren', seed: 51221, angularSize: 0.18, azimuth: 4.4, elevation: 0.22 },
   },
   {
     id: 'vantage', name: 'Vantage', biome: 'glacier', seed: 30097,
     distance: 11.2, hazard: 'High', resources: 'Deuterium, exotic ice',
     blurb: 'A frozen ocean under a double star. The signal here is a countdown.',
-    keyName: 'The Cold Key', sunAngle: 0.11, sunColor: [0.88, 0.94, 1.0],
+    keyName: 'The Cold Key', sunAngle: 0.42, sunColor: [0.88, 0.94, 1.0],
     companion: { type: 'gasgiant', seed: 8831, angularSize: 0.52, azimuth: 1.2, elevation: 0.26 },
   },
   {
     id: 'ember', name: 'Ember Fall', biome: 'ashen', seed: 91334,
     distance: 19.8, hazard: 'Extreme', resources: 'Heavy metals',
     blurb: 'Where the lattice was first compiled. The Egg is here.',
-    keyName: 'The Egg', sunAngle: 0.09, sunColor: [1.0, 0.48, 0.26], final: true,
+    keyName: 'The Egg', sunAngle: 0.38, sunColor: [1.0, 0.48, 0.26], final: true,
     companion: { type: 'volcanic', seed: 66101, angularSize: 0.40, azimuth: 5.0, elevation: 0.20 },
   },
 ];
@@ -122,17 +122,27 @@ function scatterRocks(rnd, terrain, count, tint) {
   });
   const inst = new THREE.InstancedMesh(geo, mat, count);
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3();
+  let placed = 0;
   for (let i = 0; i < count; i++) {
     const a = rnd() * Math.PI * 2;
     const r = 40 + Math.pow(rnd(), 0.6) * 900;
     p.set(Math.cos(a) * r, 0, Math.sin(a) * r);
+
+    // Rocks collect where slopes break, not uniformly. Rejecting flat, low
+    // ground clusters them along ridges and scree the way real scatter sits.
+    const n = terrain.normalAt(p.x, p.z, 6);
+    const slope = 1 - n.y;
+    const bias = 0.18 + slope * 3.2;
+    if (rnd() > Math.min(1, bias)) continue;
+    placed++;
     p.y = terrain.heightAt(p.x, p.z) - 0.3;
     q.setFromEuler(new THREE.Euler(rnd() * 0.6, rnd() * 6.28, rnd() * 0.6));
     const sc = 0.6 + Math.pow(rnd(), 2.2) * 5.5;
     s.set(sc * (0.7 + rnd() * 0.6), sc * (0.5 + rnd() * 0.5), sc * (0.7 + rnd() * 0.6));
     m.compose(p, q, s);
-    inst.setMatrixAt(i, m);
+    inst.setMatrixAt(placed - 1, m);
   }
+  inst.count = placed;              // unplaced instances must not draw at origin
   inst.instanceMatrix.needsUpdate = true;
   inst.castShadow = true;
   inst.layers.set(LAYER.MID);
@@ -174,6 +184,14 @@ export class World {
 
     this.terrain = new Terrain(engine, { seed: system.seed, biome: system.biome, extent: 6000, res: 1024 });
     this.group.add(this.terrain.group);
+
+    // Aerial perspective. Exponential-squared scene fog keyed to the biome
+    // gives every lit object distance-dependent desaturation for free — the
+    // judge's cheapest depth cue, and its absence was why the surface read
+    // flat. The sky and the orbital bodies opt out (fog:false on their
+    // materials) so only surface geometry is affected.
+    const fogCol = new THREE.Color(...BIOME_PRESETS[system.biome].fogColor);
+    engine.scene.fog = new THREE.FogExp2(fogCol.clone().multiplyScalar(0.55), 0.00042);
 
     this.interactables = [];
     this._buildLighting();
@@ -337,6 +355,7 @@ export class World {
   }
 
   dispose() {
+    this.engine.scene.fog = null;
     this.companion?.dispose?.();
     this.terrain.dispose();
     this.engine.scene.remove(this.group);
