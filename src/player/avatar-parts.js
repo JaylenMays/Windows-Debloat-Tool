@@ -95,6 +95,23 @@ export function ribs(v, v0, v1, count) {
   return env * 0.5 * (1 - Math.cos(u * count * Math.PI * 2));
 }
 
+/**
+ * Cloth folds as geometry.
+ *
+ * Sum of wave trains whose angular frequencies are integers, so the field is
+ * continuous across the ring seam. Fabric bunches where a joint forces slack,
+ * so callers multiply this by a mask that peaks at the joints — which is what
+ * turns a smooth tube into something with softgoods on it.
+ */
+export function folds(t, u, seed) {
+  const a = u * Math.PI * 2;
+  let v = Math.sin(a * 3 + t * 11.0 + seed);
+  v += 0.70 * Math.sin(a * 5 - t * 17.0 + seed * 2.3);
+  v += 0.45 * Math.sin(a * 2 + t * 27.0 + seed * 4.1);
+  v += 0.30 * Math.sin(a * 8 + t * 7.0 - seed * 1.7);
+  return v / 2.45;
+}
+
 /* --------------------------------------------------------------------- *
  * sweep(): the workhorse.
  *
@@ -152,13 +169,21 @@ export function sweep(o) {
   let arc = 0;
   const TAU = Math.PI * 2;
 
+  // Partial angular span, for surfaces that must cover only part of a ring —
+  // a visor conforming to its own helmet's profile, for instance, which is the
+  // only reliable way to keep the two flush at every point of the aperture.
+  const wrapU = o.wrapU === undefined ? true : o.wrapU;
+  const u0 = o.u0 === undefined ? 0 : o.u0;
+  const u1 = o.u1 === undefined ? 1 : o.u1;
+  const cols = wrapU ? radial : radial + 1;
+
   for (let i = 0; i < N; i++) {
     const t = i / rings;
     if (i > 0) arc += cen[i].distanceTo(cen[i - 1]);
     fwd.crossVectors(tan[i], rights[i]).normalize();
     const w = wAt(t);
-    for (let j = 0; j < radial; j++) {
-      const u = j / radial;
+    for (let j = 0; j < cols; j++) {
+      const u = wrapU ? j / radial : u0 + (u1 - u0) * (j / radial);
       const s = shape(t, u * TAU, u);
       p.copy(cen[i]).addScaledVector(rights[i], s[0]).addScaledVector(fwd, s[1]);
       pos.push(p.x, p.y, p.z);
@@ -174,8 +199,9 @@ export function sweep(o) {
   }
   for (let i = 0; i < rings; i++) {
     for (let j = 0; j < radial; j++) {
-      const a = i * radial + j, b = i * radial + ((j + 1) % radial);
-      const c = (i + 1) * radial + j, d = (i + 1) * radial + ((j + 1) % radial);
+      const jn = wrapU ? (j + 1) % radial : j + 1;
+      const a = i * cols + j, b = i * cols + jn;
+      const c = (i + 1) * cols + j, d = (i + 1) * cols + jn;
       idx.push(a, c, b, b, c, d);
     }
   }
