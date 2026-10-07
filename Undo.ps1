@@ -1,11 +1,11 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Reverts the registry and service changes made by Debloat.ps1, using backup\previous-values.json.
+    Reverts the registry and service changes made by Declutter.ps1, using backup\previous-values.json.
 .NOTES
     Removed apps, Edge and OneDrive are NOT reinstalled by this script.
     Reinstall apps from the Microsoft Store, Edge from microsoft.com/edge, OneDrive from microsoft.com/onedrive.
-    Alternatively, restore the System Restore point "Before Windows-Debloat-Tool".
+    Alternatively, restore the System Restore point "Before Win11-Declutter".
 #>
 [CmdletBinding()]
 param([switch]$DryRun)

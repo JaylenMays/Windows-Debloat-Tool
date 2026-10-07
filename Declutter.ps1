@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Windows 11 debloat tool.
+    Windows 11 declutter tool.
 .DESCRIPTION
     Removes preinstalled apps, Microsoft Edge and OneDrive, and applies privacy/UI tweaks.
     Run as Administrator. Use -DryRun first to see what would happen.
@@ -20,7 +20,7 @@ $ErrorActionPreference = 'Continue'
 $Root       = $PSScriptRoot
 $BackupDir  = Join-Path $Root 'backup'
 $BackupFile = Join-Path $BackupDir 'previous-values.json'
-$LogFile    = Join-Path $Root 'debloat-log.txt'
+$LogFile    = Join-Path $Root 'declutter-log.txt'
 $Summary    = [ordered]@{ Removed = @(); Changed = @(); Skipped = @(); Failed = @() }
 $Backup     = @{ Registry = @(); Services = @() }
 
@@ -67,7 +67,7 @@ if ($build -lt 22000) {
 }
 
 Write-Host ''
-Write-Host '=== Windows-Debloat-Tool ===' -ForegroundColor Cyan
+Write-Host '=== Win11-Declutter ===' -ForegroundColor Cyan
 if ($DryRun) { Write-Host 'DRY RUN: nothing will be changed.' -ForegroundColor Yellow }
 else {
     Write-Host 'This will remove apps (including Edge, OneDrive, Photos, Calculator, Notepad) and change settings.' -ForegroundColor Yellow
@@ -75,7 +75,7 @@ else {
     New-Item -ItemType Directory -Force -Path $BackupDir | Out-Null
     Do-Action 'Create System Restore point' {
         Enable-ComputerRestore -Drive "$env:SystemDrive\" -ErrorAction SilentlyContinue
-        Checkpoint-Computer -Description 'Before Windows-Debloat-Tool' -RestorePointType MODIFY_SETTINGS -ErrorAction Stop
+        Checkpoint-Computer -Description 'Before Win11-Declutter' -RestorePointType MODIFY_SETTINGS -ErrorAction Stop
     }
 }
 

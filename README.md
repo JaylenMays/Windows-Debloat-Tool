@@ -1,12 +1,12 @@
-# Windows-Debloat-Tool
+# Win11-Declutter
 
-A PowerShell tool that debloats Windows 11. It removes preinstalled apps, Microsoft Edge and OneDrive, and applies privacy and UI tweaks.
+A PowerShell tool that declutters Windows 11. It removes preinstalled apps, Microsoft Edge and OneDrive, and applies privacy and UI tweaks.
 
 ## Usage
 
 1. Download or clone this repo.
 2. **Preview first:** open a terminal in the folder and run `Run.bat -DryRun`. It prints what would change and changes nothing.
-3. Run `Run.bat` (or `.\Debloat.ps1` from an elevated PowerShell). You are asked before each section. Use `-Auto` to skip the prompts.
+3. Run `Run.bat` (or `.\Declutter.ps1` from an elevated PowerShell). You are asked before each section. Use `-Auto` to skip the prompts.
 4. To revert settings, run `.\Undo.ps1` as Administrator.
 
 ## What it does
@@ -18,7 +18,7 @@ A PowerShell tool that debloats Windows 11. It removes preinstalled apps, Micros
 - **Privacy tweaks** (from `config/tweaks.json`): minimum telemetry, advertising ID, tailored experiences, activity history, Bing in Start search, suggested content, Copilot, Recall, Widgets, Chat icon.
 - **Optional UI tweaks** (asked one by one): classic right-click menu, show file extensions, show hidden files, taskbar aligned left.
 - **Optional:** disable the `DiagTrack` and `dmwappushservice` telemetry services.
-- Writes a summary to `debloat-log.txt` and offers a restart.
+- Writes a summary to `declutter-log.txt` and offers a restart.
 
 ## Kept on purpose
 
