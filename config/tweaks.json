@@ -1,0 +1,23 @@
+[
+  { "group": "privacy", "name": "Minimum telemetry",        "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\DataCollection", "value": "AllowTelemetry", "type": "DWord", "data": 0 },
+  { "group": "privacy", "name": "Advertising ID off",       "path": "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\AdvertisingInfo", "value": "Enabled", "type": "DWord", "data": 0 },
+  { "group": "privacy", "name": "Tailored experiences off", "path": "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Privacy", "value": "TailoredExperiencesWithDiagnosticDataEnabled", "type": "DWord", "data": 0 },
+  { "group": "privacy", "name": "Activity history off (publish)", "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\System", "value": "PublishUserActivities", "type": "DWord", "data": 0 },
+  { "group": "privacy", "name": "Activity history off (feed)",    "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\System", "value": "EnableActivityFeed", "type": "DWord", "data": 0 },
+  { "group": "privacy", "name": "Activity history off (upload)",  "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\System", "value": "UploadUserActivities", "type": "DWord", "data": 0 },
+  { "group": "privacy", "name": "Bing in Start search off", "path": "HKCU:\\Software\\Policies\\Microsoft\\Windows\\Explorer", "value": "DisableSearchBoxSuggestions", "type": "DWord", "data": 1 },
+  { "group": "privacy", "name": "Suggested content off (1)", "path": "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\ContentDeliveryManager", "value": "SubscribedContent-338388Enabled", "type": "DWord", "data": 0 },
+  { "group": "privacy", "name": "Suggested content off (2)", "path": "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\ContentDeliveryManager", "value": "SubscribedContent-338389Enabled", "type": "DWord", "data": 0 },
+  { "group": "privacy", "name": "Suggested content off (3)", "path": "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\ContentDeliveryManager", "value": "SubscribedContent-310093Enabled", "type": "DWord", "data": 0 },
+  { "group": "privacy", "name": "Start suggestions off",     "path": "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\ContentDeliveryManager", "value": "SystemPaneSuggestionsEnabled", "type": "DWord", "data": 0 },
+  { "group": "privacy", "name": "Silent app installs off",   "path": "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\ContentDeliveryManager", "value": "SilentInstalledAppsEnabled", "type": "DWord", "data": 0 },
+  { "group": "privacy", "name": "Copilot off",               "path": "HKCU:\\Software\\Policies\\Microsoft\\Windows\\WindowsCopilot", "value": "TurnOffWindowsCopilot", "type": "DWord", "data": 1 },
+  { "group": "privacy", "name": "Recall off",                "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsAI", "value": "DisableAIDataAnalysis", "type": "DWord", "data": 1 },
+  { "group": "privacy", "name": "Widgets off",               "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Dsh", "value": "AllowNewsAndInterests", "type": "DWord", "data": 0 },
+  { "group": "privacy", "name": "Chat/Teams taskbar icon off", "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\Windows Chat", "value": "ChatIcon", "type": "DWord", "data": 3 },
+
+  { "group": "ui", "name": "Classic right-click menu", "path": "HKCU:\\Software\\Classes\\CLSID\\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}\\InprocServer32", "value": "(default)", "type": "String", "data": "", "undoRemoveKey": "HKCU:\\Software\\Classes\\CLSID\\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}" },
+  { "group": "ui", "name": "Show file extensions",     "path": "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced", "value": "HideFileExt", "type": "DWord", "data": 0 },
+  { "group": "ui", "name": "Show hidden files",        "path": "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced", "value": "Hidden", "type": "DWord", "data": 1 },
+  { "group": "ui", "name": "Taskbar aligned left",     "path": "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced", "value": "TaskbarAl", "type": "DWord", "data": 0 }
+]

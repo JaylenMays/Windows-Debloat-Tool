@@ -1,0 +1,50 @@
+# One package name per line. Wildcards (*) allowed. Lines starting with # are ignored.
+# Delete a line to keep that app.
+
+# --- Apps you asked to remove ---
+Microsoft.Windows.Photos
+Microsoft.WindowsCalculator
+Microsoft.WindowsNotepad
+
+# --- Microsoft bloat ---
+Clipchamp.Clipchamp
+Microsoft.BingNews
+Microsoft.BingWeather
+Microsoft.BingSearch
+Microsoft.Copilot
+Microsoft.GetHelp
+Microsoft.Getstarted
+Microsoft.MicrosoftOfficeHub
+Microsoft.MicrosoftSolitaireCollection
+Microsoft.MicrosoftStickyNotes
+Microsoft.WindowsFeedbackHub
+Microsoft.MixedReality.Portal
+Microsoft.Microsoft3DViewer
+Microsoft.MSPaint
+Microsoft.People
+Microsoft.PowerAutomateDesktop
+Microsoft.SkypeApp
+MicrosoftTeams
+MSTeams
+Microsoft.YourPhone
+Microsoft.549981C3F5F10
+Microsoft.WindowsMaps
+Microsoft.ZuneVideo
+Microsoft.ZuneMusic
+Microsoft.Todos
+MicrosoftCorporationII.MicrosoftFamily
+MicrosoftCorporationII.QuickAssist
+
+# --- Xbox (identity provider is intentionally kept) ---
+Microsoft.XboxApp
+Microsoft.XboxGamingOverlay
+Microsoft.XboxGameOverlay
+Microsoft.XboxSpeechToTextOverlay
+Microsoft.Xbox.TCUI
+
+# --- Third-party promos ---
+*TikTok*
+*Instagram*
+*Disney*
+*Spotify*
+*CandyCrush*
